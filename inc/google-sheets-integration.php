@@ -3590,34 +3590,35 @@ class GoogleSheetsSync {
      * @return array 類似グループの配列
      */
     private function find_similar_title_groups($limit = 500, $threshold = 0.5) {
-        global $wpdb;
-        
-        // キーワードで絞り込み（「補助金」「助成金」などを含むもの）
-        $keywords = array('補助金', '助成金', 'ものづくり', '事業再構築', '小規模事業者', 'IT導入');
-        $keyword_conditions = array();
-        
-        foreach ($keywords as $keyword) {
-            $keyword_conditions[] = $wpdb->prepare("post_title LIKE %s", '%' . $wpdb->esc_like($keyword) . '%');
-        }
-        
-        $where_clause = '(' . implode(' OR ', $keyword_conditions) . ')';
-        
-        // キーワードを含む投稿のみ取得（タイトルとIDのみ、メモリ節約）
-        $query = "
-            SELECT ID, post_title
-            FROM {$wpdb->posts}
-            WHERE post_type = 'grant'
-            AND post_status IN ('publish', 'draft', 'private', 'pending')
-            AND {$where_clause}
-            ORDER BY post_title ASC
-            LIMIT %d
-        ";
-        
-        $posts = $wpdb->get_results($wpdb->prepare($query, $limit));
-        
-        if (empty($posts)) {
-            return array();
-        }
+        try {
+            global $wpdb;
+            
+            // キーワードで絞り込み（「補助金」「助成金」などを含むもの）
+            $keywords = array('補助金', '助成金', 'ものづくり', '事業再構築', '小規模事業者', 'IT導入');
+            $keyword_conditions = array();
+            
+            foreach ($keywords as $keyword) {
+                $keyword_conditions[] = $wpdb->prepare("post_title LIKE %s", '%' . $wpdb->esc_like($keyword) . '%');
+            }
+            
+            $where_clause = '(' . implode(' OR ', $keyword_conditions) . ')';
+            
+            // キーワードを含む投稿のみ取得（タイトルとIDのみ、メモリ節約）
+            $query = "
+                SELECT ID, post_title
+                FROM {$wpdb->posts}
+                WHERE post_type = 'grant'
+                AND post_status IN ('publish', 'draft', 'private', 'pending')
+                AND {$where_clause}
+                ORDER BY post_title ASC
+                LIMIT %d
+            ";
+            
+            $posts = $wpdb->get_results($wpdb->prepare($query, $limit));
+            
+            if (empty($posts)) {
+                return array();
+            }
         
         gi_log_error('Finding similar titles', array('filtered_posts' => count($posts)));
         
@@ -3658,13 +3659,21 @@ class GoogleSheetsSync {
             unset($group);
         }
         
-        // メモリ解放
-        unset($posts);
-        unset($processed);
-        
-        gi_log_error('Similar groups found', array('groups' => count($groups)));
-        
-        return $groups;
+            // メモリ解放
+            unset($posts);
+            unset($processed);
+            
+            gi_log_error('Similar groups found', array('groups' => count($groups)));
+            
+            return $groups;
+            
+        } catch (Exception $e) {
+            gi_log_error('Find similar title groups failed', array(
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ));
+            return array();
+        }
     }
     
     /**
@@ -3708,7 +3717,8 @@ class GoogleSheetsSync {
                 return;
             }
             
-            gi_log_error('Found duplicate titles', array('count' => count($duplicate_titles)));
+            $duplicate_titles_count = count($duplicate_titles);
+            gi_log_error('Found duplicate titles', array('count' => $duplicate_titles_count));
             
             // スプレッドシートに書き込むデータを準備
             $export_data = array();
@@ -3797,12 +3807,21 @@ class GoogleSheetsSync {
             // 完全一致の重複データをメモリから解放
             unset($duplicate_titles);
             
-            // 類似タイトルを検出（キーワードでフィルタ、最大500件、50%以上一致）
-            gi_log_error('Starting similar title detection');
+            // 類似タイトルを検出（キーワードでフィルタ、最大200件、50%以上一致）
+            // メモリ効率のため、投稿数が少ない場合のみ実行
+            $similar_groups = array();
+            $similar_groups_count = 0;
             
-            $similar_groups = $this->find_similar_title_groups(500, 0.5);
-            
-            gi_log_error('Found similar title groups', array('groups' => count($similar_groups)));
+            try {
+                gi_log_error('Starting similar title detection');
+                $similar_groups = $this->find_similar_title_groups(200, 0.6); // 60%以上に変更してマッチング数を減らす
+                $similar_groups_count = count($similar_groups);
+                gi_log_error('Found similar title groups', array('groups' => $similar_groups_count));
+            } catch (Exception $e) {
+                gi_log_error('Similar title detection failed, skipping', array('error' => $e->getMessage()));
+                $similar_groups = array();
+                $similar_groups_count = 0;
+            }
             
             // 類似グループをエクスポートデータに追加
             if (!empty($similar_groups)) {
@@ -3892,7 +3911,7 @@ class GoogleSheetsSync {
                 unset($similar_groups);
             }
             
-            gi_log_error('Prepared all export data', array('rows' => count($export_data), 'similar_groups' => count($similar_groups)));
+            gi_log_error('Prepared all export data', array('rows' => count($export_data), 'similar_groups' => $similar_groups_count));
             
             // 「DuplicateTitles」シートを作成または取得（日本語シート名はAPIエラーになるため英語を使用）
             $sheet_name = 'DuplicateTitles';
@@ -3940,16 +3959,16 @@ class GoogleSheetsSync {
             if ($result) {
                 $spreadsheet_url = 'https://docs.google.com/spreadsheets/d/' . $this->get_spreadsheet_id() . '/edit';
                 
-                $message = '✅ 完全一致 ' . count($duplicate_titles) . ' グループ';
-                if (!empty($similar_groups)) {
-                    $message .= ' + 類似タイトル ' . count($similar_groups) . ' グループ';
+                $message = '✅ 完全一致 ' . $duplicate_titles_count . ' グループ';
+                if ($similar_groups_count > 0) {
+                    $message .= ' + 類似タイトル ' . $similar_groups_count . ' グループ';
                 }
                 $message .= ' をエクスポートしました';
                 
                 wp_send_json_success(array(
                     'message' => $message,
-                    'exact_count' => count($duplicate_titles),
-                    'similar_count' => count($similar_groups),
+                    'exact_count' => $duplicate_titles_count,
+                    'similar_count' => $similar_groups_count,
                     'total_posts' => count($export_data) - 1, // ヘッダー行を除く
                     'spreadsheet_url' => $spreadsheet_url,
                     'sheet_name' => $sheet_name
