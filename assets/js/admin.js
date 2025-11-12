@@ -706,6 +706,7 @@ const GrantInsightAdmin = {
         const clearSheetBtn = document.getElementById('clear-sheet');
         const exportByIdRangeBtn = document.getElementById('export-by-id-range');
         const checkDuplicatesBtn = document.getElementById('check-duplicates');
+        const exportDuplicatesBtn = document.getElementById('export-duplicates');
         
         if (initializeBtn) {
             initializeBtn.addEventListener('click', () => this.initializeSheet());
@@ -725,6 +726,10 @@ const GrantInsightAdmin = {
         
         if (checkDuplicatesBtn) {
             checkDuplicatesBtn.addEventListener('click', () => this.checkDuplicateTitles());
+        }
+        
+        if (exportDuplicatesBtn) {
+            exportDuplicatesBtn.addEventListener('click', () => this.exportDuplicateTitles());
         }
     },
 
@@ -939,6 +944,96 @@ const GrantInsightAdmin = {
                 console.error('Duplicate check error:', error);
                 const errorMsg = 'ネットワークエラー: ' + error.message;
                 if (contentDiv) contentDiv.textContent = errorMsg;
+                if (resultDiv) {
+                    resultDiv.className = 'notice notice-error';
+                    resultDiv.style.display = 'block';
+                }
+                this.showNotice('error', errorMsg);
+            })
+            .finally(() => {
+                // ボタンを復元
+                btn.disabled = false;
+                btn.textContent = originalText;
+            });
+    },
+    
+    /**
+     * 重複タイトルをスプレッドシートにエクスポート
+     */
+    exportDuplicateTitles() {
+        const btn = document.getElementById('export-duplicates');
+        const resultDiv = document.getElementById('duplicate-export-result');
+        const messageDiv = document.getElementById('duplicate-export-message');
+        
+        if (!btn) return;
+        
+        // 確認ダイアログ
+        if (!confirm('重複している投稿を「重複タイトル」シートにエクスポートしますか？')) {
+            return;
+        }
+        
+        // ボタンを無効化
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '📤 エクスポート中...';
+        
+        // 結果エリアを非表示
+        if (resultDiv) resultDiv.style.display = 'none';
+        
+        const ajaxData = {
+            action: 'gi_export_duplicate_titles',
+            nonce: window.giSheetsAdmin?.nonce
+        };
+
+        this.ajax(ajaxData, { timeout: 120000 })
+            .then(response => {
+                if (response.success) {
+                    const data = response.data;
+                    let html = '<strong>' + data.message + '</strong><br><br>';
+                    
+                    if (data.count > 0) {
+                        html += '<p>';
+                        html += '✅ 重複グループ数: <strong>' + data.count + '</strong><br>';
+                        html += '📊 総投稿数: <strong>' + data.total_posts + '</strong><br>';
+                        html += '</p>';
+                        
+                        if (data.spreadsheet_url) {
+                            html += '<p>';
+                            html += '<a href="' + data.spreadsheet_url + '" target="_blank" class="button button-primary">';
+                            html += '📊 「' + data.sheet_name + '」シートを開く';
+                            html += '</a>';
+                            html += '</p>';
+                            html += '<p class="description">';
+                            html += '<strong>💡 次のステップ：</strong><br>';
+                            html += '1. スプレッドシートで重複投稿を確認<br>';
+                            html += '2. 削除したい投稿のE列（ステータス）を「deleted」に変更<br>';
+                            html += '3. 「Sheets → WordPress 同期」で削除を実行';
+                            html += '</p>';
+                        }
+                    }
+                    
+                    if (messageDiv) messageDiv.innerHTML = html;
+                    if (resultDiv) {
+                        resultDiv.className = 'notice notice-success';
+                        resultDiv.style.display = 'block';
+                    }
+                    
+                    this.showNotice('success', data.message);
+                    
+                } else {
+                    const errorMsg = response.data || 'エクスポートに失敗しました';
+                    if (messageDiv) messageDiv.textContent = errorMsg;
+                    if (resultDiv) {
+                        resultDiv.className = 'notice notice-error';
+                        resultDiv.style.display = 'block';
+                    }
+                    this.showNotice('error', errorMsg);
+                }
+            })
+            .catch(error => {
+                console.error('Export duplicates error:', error);
+                const errorMsg = 'ネットワークエラー: ' + error.message;
+                if (messageDiv) messageDiv.textContent = errorMsg;
                 if (resultDiv) {
                     resultDiv.className = 'notice notice-error';
                     resultDiv.style.display = 'block';
