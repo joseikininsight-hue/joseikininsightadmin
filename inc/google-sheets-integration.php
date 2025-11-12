@@ -3610,9 +3610,6 @@ class GoogleSheetsSync {
             
             gi_log_error('Prepared export data', array('rows' => count($export_data)));
             
-            // GoogleSheetsSyncインスタンスを取得
-            $sheets_sync = GoogleSheetsSync::getInstance();
-            
             // 「重複タイトル」シートを作成または取得
             $sheet_name = '重複タイトル';
             
@@ -3622,14 +3619,14 @@ class GoogleSheetsSync {
             try {
                 // まず、既存シートのデータをクリア（存在する場合）
                 $clear_range = $sheet_name . '!A:K';
-                $sheets_sync->clear_sheet_range($clear_range);
+                $this->clear_sheet_range($clear_range);
                 gi_log_error('Cleared existing sheet data');
             } catch (Exception $e) {
                 // シートが存在しない場合は作成
                 gi_log_error('Sheet does not exist, creating new sheet', array('error' => $e->getMessage()));
                 
-                $new_sheet = $sheets_sync->create_new_sheet(
-                    $sheets_sync->get_spreadsheet_id(),
+                $new_sheet = $this->create_new_sheet(
+                    $this->get_spreadsheet_id(),
                     $sheet_name
                 );
                 
@@ -3642,10 +3639,10 @@ class GoogleSheetsSync {
             
             // データを書き込み
             $write_range = $sheet_name . '!A1:K' . count($export_data);
-            $result = $sheets_sync->write_sheet_data($write_range, $export_data, 'USER_ENTERED');
+            $result = $this->write_sheet_data($write_range, $export_data, 'USER_ENTERED');
             
             if ($result) {
-                $spreadsheet_url = 'https://docs.google.com/spreadsheets/d/' . $sheets_sync->get_spreadsheet_id() . '/edit';
+                $spreadsheet_url = 'https://docs.google.com/spreadsheets/d/' . $this->get_spreadsheet_id() . '/edit';
                 
                 wp_send_json_success(array(
                     'message' => '✅ 重複タイトル ' . count($duplicate_titles) . ' グループをエクスポートしました',
