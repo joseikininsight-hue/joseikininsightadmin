@@ -43,6 +43,7 @@ class GoogleSheetsSync {
     private $sheet_name;
     private $access_token;
     private $token_expires_at;
+    private $last_error = null;
     
     // Google Sheets API設定
     const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets/';
@@ -378,12 +379,34 @@ class GoogleSheetsSync {
     }
     
     /**
+     * 最後のエラーを取得
+     */
+    public function get_last_error() {
+        return $this->last_error;
+    }
+    
+    /**
+     * エラーを設定
+     */
+    private function set_error($error_message, $error_details = array()) {
+        $this->last_error = array(
+            'message' => $error_message,
+            'details' => $error_details,
+            'timestamp' => current_time('mysql')
+        );
+        gi_log_error($error_message, $error_details);
+    }
+    
+    /**
      * スプレッドシートにデータを書き込み
      */
     public function write_sheet_data($range, $values, $input_option = 'RAW') {
         $access_token = $this->get_access_token();
         if (!$access_token) {
-            gi_log_error('Write Sheet Data: No access token available');
+            $this->set_error('アクセストークンの取得に失敗しました', array(
+                'spreadsheet_id' => $this->spreadsheet_id,
+                'range' => $range
+            ));
             return false;
         }
         
@@ -412,7 +435,10 @@ class GoogleSheetsSync {
         
         gi_log_error('Sheets API request details', array(
             'url' => $url,
-            'request_body' => $request_body
+            'request_body_sample' => array(
+                'range' => $range,
+                'rows_count' => count($values)
+            )
         ));
         
         $response = wp_remote_request($url, array(
@@ -426,7 +452,7 @@ class GoogleSheetsSync {
         ));
         
         if (is_wp_error($response)) {
-            gi_log_error('Sheets Write Request Failed', array(
+            $this->set_error('Google Sheets APIリクエストが失敗しました', array(
                 'error' => $response->get_error_message(),
                 'range' => $range,
                 'url' => $url
@@ -444,10 +470,19 @@ class GoogleSheetsSync {
         ));
         
         if ($response_code < 200 || $response_code >= 300) {
-            gi_log_error('Sheets Write Failed - Bad Response Code', array(
+            // APIエラーレスポンスをパース
+            $error_data = json_decode($response_body, true);
+            $error_message = 'Google Sheets APIがエラーを返しました';
+            
+            if (isset($error_data['error']['message'])) {
+                $error_message = $error_data['error']['message'];
+            }
+            
+            $this->set_error($error_message, array(
                 'response_code' => $response_code,
                 'response_body' => $response_body,
-                'range' => $range
+                'range' => $range,
+                'spreadsheet_id' => $this->spreadsheet_id
             ));
             return false;
         }
@@ -570,7 +605,10 @@ class GoogleSheetsSync {
         try {
             $access_token = $this->get_access_token();
             if (!$access_token) {
-                gi_log_error('Create New Sheet: No access token available');
+                $this->set_error('新しいシート作成: アクセストークンの取得に失敗しました', array(
+                    'spreadsheet_id' => $spreadsheet_id,
+                    'sheet_title' => $sheet_title
+                ));
                 return null;
             }
             
@@ -606,8 +644,9 @@ class GoogleSheetsSync {
             ));
             
             if (is_wp_error($response)) {
-                gi_log_error('Create New Sheet Request Failed', array(
-                    'error' => $response->get_error_message()
+                $this->set_error('新しいシート作成リクエストが失敗しました', array(
+                    'error' => $response->get_error_message(),
+                    'sheet_title' => $sheet_title
                 ));
                 return null;
             }
@@ -622,9 +661,18 @@ class GoogleSheetsSync {
             ));
             
             if ($response_code < 200 || $response_code >= 300) {
-                gi_log_error('Create New Sheet Failed - Bad Response Code', array(
+                // APIエラーレスポンスをパース
+                $error_data = json_decode($response_body, true);
+                $error_message = '新しいシートの作成に失敗しました';
+                
+                if (isset($error_data['error']['message'])) {
+                    $error_message = $error_data['error']['message'];
+                }
+                
+                $this->set_error($error_message, array(
                     'response_code' => $response_code,
-                    'response_body' => $response_body
+                    'response_body' => $response_body,
+                    'sheet_title' => $sheet_title
                 ));
                 return null;
             }
@@ -3638,7 +3686,12 @@ class GoogleSheetsSync {
                 );
                 
                 if (!$new_sheet) {
-                    throw new Exception('重複タイトルシートの作成に失敗しました');
+                    $last_error = $this->get_last_error();
+                    $error_msg = '重複タイトルシートの作成に失敗しました';
+                    if ($last_error) {
+                        $error_msg .= ': ' . $last_error['message'];
+                    }
+                    throw new Exception($error_msg);
                 }
                 
                 gi_log_error('Created new sheet', array('sheet' => $new_sheet));
@@ -3666,11 +3719,26 @@ class GoogleSheetsSync {
                     'sheet_name' => $sheet_name
                 ));
             } else {
+                // 詳細なエラー情報を取得
+                $last_error = $this->get_last_error();
+                $error_details = '';
+                
+                if ($last_error) {
+                    $error_details = $last_error['message'];
+                    if (isset($last_error['details']['response_code'])) {
+                        $error_details .= ' (HTTP ' . $last_error['details']['response_code'] . ')';
+                    }
+                } else {
+                    $error_details = 'スプレッドシートへの書き込みに失敗しました（詳細不明）';
+                }
+                
                 gi_log_error('Write failed - result is false', array(
                     'range' => $write_range,
-                    'data_count' => count($export_data)
+                    'data_count' => count($export_data),
+                    'last_error' => $last_error
                 ));
-                throw new Exception('スプレッドシートへの書き込みに失敗しました。詳細はエラーログを確認してください。');
+                
+                throw new Exception($error_details);
             }
             
         } catch (Exception $e) {
@@ -3678,7 +3746,7 @@ class GoogleSheetsSync {
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ));
-            wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
+            wp_send_json_error('❌ エクスポートに失敗しました: ' . $e->getMessage());
         }
     }
     
