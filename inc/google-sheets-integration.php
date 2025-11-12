@@ -3539,7 +3539,8 @@ class GoogleSheetsSync {
     }
     
     /**
-     * タイトルの類似度を計算（文字単位の一致率）
+     * タイトルの類似度を計算（単語ベースの簡易版）
+     * メモリ効率を重視した実装
      * 
      * @param string $title1 タイトル1
      * @param string $title2 タイトル2
@@ -3556,50 +3557,95 @@ class GoogleSheetsSync {
             return 1.0;
         }
         
-        // 文字列を配列に分解
-        $chars1 = preg_split('//u', $title1, -1, PREG_SPLIT_NO_EMPTY);
-        $chars2 = preg_split('//u', $title2, -1, PREG_SPLIT_NO_EMPTY);
+        // 短い方の長さを基準に、含まれている文字数をカウント
+        $len1 = mb_strlen($title1, 'UTF-8');
+        $len2 = mb_strlen($title2, 'UTF-8');
         
-        // 共通文字数をカウント
-        $common_chars = array_intersect($chars1, $chars2);
-        $common_count = count($common_chars);
+        if ($len1 === 0 || $len2 === 0) {
+            return 0.0;
+        }
         
-        // 類似度を計算（共通文字数 / 長い方の文字数）
-        $max_length = max(count($chars1), count($chars2));
+        // 短い方を長い方に含まれる文字数でカウント
+        $short = $len1 < $len2 ? $title1 : $title2;
+        $long = $len1 < $len2 ? $title2 : $title1;
+        $short_len = min($len1, $len2);
         
-        return $max_length > 0 ? ($common_count / $max_length) : 0.0;
+        $match_count = 0;
+        for ($i = 0; $i < $short_len; $i++) {
+            $char = mb_substr($short, $i, 1, 'UTF-8');
+            if (mb_strpos($long, $char, 0, 'UTF-8') !== false) {
+                $match_count++;
+            }
+        }
+        
+        return $match_count / $short_len;
     }
     
     /**
-     * 類似タイトルグループを検出
+     * 類似タイトルグループを検出（メモリ効率版）
+     * キーワードベースで事前フィルタリングしてから比較
      * 
-     * @param array $all_posts すべての投稿
+     * @param int $limit 処理する投稿数の上限（デフォルト500）
      * @param float $threshold 類似度閾値（デフォルト0.5 = 50%）
      * @return array 類似グループの配列
      */
-    private function find_similar_title_groups($all_posts, $threshold = 0.5) {
+    private function find_similar_title_groups($limit = 500, $threshold = 0.5) {
+        global $wpdb;
+        
+        // キーワードで絞り込み（「補助金」「助成金」などを含むもの）
+        $keywords = array('補助金', '助成金', 'ものづくり', '事業再構築', '小規模事業者', 'IT導入');
+        $keyword_conditions = array();
+        
+        foreach ($keywords as $keyword) {
+            $keyword_conditions[] = $wpdb->prepare("post_title LIKE %s", '%' . $wpdb->esc_like($keyword) . '%');
+        }
+        
+        $where_clause = '(' . implode(' OR ', $keyword_conditions) . ')';
+        
+        // キーワードを含む投稿のみ取得（タイトルとIDのみ、メモリ節約）
+        $query = "
+            SELECT ID, post_title
+            FROM {$wpdb->posts}
+            WHERE post_type = 'grant'
+            AND post_status IN ('publish', 'draft', 'private', 'pending')
+            AND {$where_clause}
+            ORDER BY post_title ASC
+            LIMIT %d
+        ";
+        
+        $posts = $wpdb->get_results($wpdb->prepare($query, $limit));
+        
+        if (empty($posts)) {
+            return array();
+        }
+        
+        gi_log_error('Finding similar titles', array('filtered_posts' => count($posts)));
+        
         $groups = array();
         $processed = array();
         
-        foreach ($all_posts as $i => $post1) {
-            if (isset($processed[$post1->ID])) {
+        // 比較処理
+        $post_count = count($posts);
+        for ($i = 0; $i < $post_count; $i++) {
+            if (isset($processed[$posts[$i]->ID])) {
                 continue;
             }
             
-            $group = array($post1);
-            $processed[$post1->ID] = true;
+            $group = array($posts[$i]);
+            $processed[$posts[$i]->ID] = true;
             
-            // 他の投稿と比較
-            foreach ($all_posts as $j => $post2) {
-                if ($i >= $j || isset($processed[$post2->ID])) {
+            // 後続の投稿と比較（比較回数を制限）
+            $compare_limit = min($i + 50, $post_count); // 最大50件と比較
+            for ($j = $i + 1; $j < $compare_limit; $j++) {
+                if (isset($processed[$posts[$j]->ID])) {
                     continue;
                 }
                 
-                $similarity = $this->calculate_title_similarity($post1->post_title, $post2->post_title);
+                $similarity = $this->calculate_title_similarity($posts[$i]->post_title, $posts[$j]->post_title);
                 
                 if ($similarity >= $threshold) {
-                    $group[] = $post2;
-                    $processed[$post2->ID] = true;
+                    $group[] = $posts[$j];
+                    $processed[$posts[$j]->ID] = true;
                 }
             }
             
@@ -3607,7 +3653,16 @@ class GoogleSheetsSync {
             if (count($group) > 1) {
                 $groups[] = $group;
             }
+            
+            // メモリ解放
+            unset($group);
         }
+        
+        // メモリ解放
+        unset($posts);
+        unset($processed);
+        
+        gi_log_error('Similar groups found', array('groups' => count($groups)));
         
         return $groups;
     }
@@ -3629,7 +3684,7 @@ class GoogleSheetsSync {
             }
             
             // メモリ制限を拡張
-            @ini_set('memory_limit', '512M');
+            @ini_set('memory_limit', '1024M'); // 1GBに増加
             @set_time_limit(300);
             
             global $wpdb;
@@ -3739,18 +3794,13 @@ class GoogleSheetsSync {
             
             gi_log_error('Prepared exact duplicate data', array('rows' => count($export_data)));
             
-            // 類似タイトルを検出（50%以上一致）
-            $all_posts = get_posts(array(
-                'post_type' => 'grant',
-                'post_status' => array('publish', 'draft', 'private', 'pending'),
-                'posts_per_page' => -1,
-                'orderby' => 'title',
-                'order' => 'ASC'
-            ));
+            // 完全一致の重複データをメモリから解放
+            unset($duplicate_titles);
             
-            gi_log_error('Finding similar titles', array('total_posts' => count($all_posts)));
+            // 類似タイトルを検出（キーワードでフィルタ、最大500件、50%以上一致）
+            gi_log_error('Starting similar title detection');
             
-            $similar_groups = $this->find_similar_title_groups($all_posts, 0.5);
+            $similar_groups = $this->find_similar_title_groups(500, 0.5);
             
             gi_log_error('Found similar title groups', array('groups' => count($similar_groups)));
             
@@ -3765,7 +3815,22 @@ class GoogleSheetsSync {
                     $is_first_in_group = true;
                     $group_size = count($group);
                     
-                    foreach ($group as $post) {
+                    // グループ内の投稿IDを収集
+                    $group_ids = array();
+                    foreach ($group as $simple_post) {
+                        $group_ids[] = $simple_post->ID;
+                    }
+                    
+                    // 投稿詳細を一括取得（メモリ効率化）
+                    $detailed_posts = get_posts(array(
+                        'post_type' => 'grant',
+                        'post__in' => $group_ids,
+                        'posts_per_page' => count($group_ids),
+                        'orderby' => 'ID',
+                        'order' => 'ASC'
+                    ));
+                    
+                    foreach ($detailed_posts as $post) {
                         // 都道府県を取得
                         $prefectures = wp_get_post_terms($post->ID, 'grant_prefecture', array('fields' => 'names'));
                         $prefecture_names = is_array($prefectures) && !is_wp_error($prefectures) ? implode(', ', $prefectures) : '';
@@ -3811,10 +3876,20 @@ class GoogleSheetsSync {
                         );
                     }
                     
+                    // メモリ解放
+                    unset($detailed_posts);
+                    unset($group_ids);
+                    
                     // グループ区切り用の空行
                     $export_data[] = array('', '', '', '', '', '', '', '', '', '', '');
                     $group_number++;
                 }
+                
+                // 類似グループデータをメモリから解放
+                unset($similar_groups);
+            } else {
+                // 類似グループがない場合もメモリ解放
+                unset($similar_groups);
             }
             
             gi_log_error('Prepared all export data', array('rows' => count($export_data), 'similar_groups' => count($similar_groups)));
