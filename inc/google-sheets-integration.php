@@ -595,6 +595,68 @@ class GoogleSheetsSync {
     }
     
     /**
+     * 指定されたシートが存在するかチェック
+     *
+     * @param string $sheet_name シート名
+     * @return bool シートが存在する場合true
+     */
+    public function check_sheet_exists($sheet_name) {
+        try {
+            $access_token = $this->get_access_token();
+            if (!$access_token) {
+                return false;
+            }
+            
+            $url = self::SHEETS_API_URL . $this->spreadsheet_id . '?fields=sheets.properties';
+            
+            $response = wp_remote_get($url, array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . $access_token,
+                ),
+                'timeout' => 30
+            ));
+            
+            if (is_wp_error($response)) {
+                gi_log_error('Check sheet exists failed', array(
+                    'error' => $response->get_error_message(),
+                    'sheet_name' => $sheet_name
+                ));
+                return false;
+            }
+            
+            $response_code = wp_remote_retrieve_response_code($response);
+            if ($response_code !== 200) {
+                return false;
+            }
+            
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+            
+            if (!isset($data['sheets'])) {
+                return false;
+            }
+            
+            // シート名を検索
+            foreach ($data['sheets'] as $sheet) {
+                if (isset($sheet['properties']['title']) && $sheet['properties']['title'] === $sheet_name) {
+                    gi_log_error('Sheet exists', array('sheet_name' => $sheet_name));
+                    return true;
+                }
+            }
+            
+            gi_log_error('Sheet does not exist', array('sheet_name' => $sheet_name));
+            return false;
+            
+        } catch (Exception $e) {
+            gi_log_error('Check sheet exists exception', array(
+                'error' => $e->getMessage(),
+                'sheet_name' => $sheet_name
+            ));
+            return false;
+        }
+    }
+    
+    /**
      * 指定されたスプレッドシートに新しいシート（タブ）を作成する
      *
      * @param string $spreadsheet_id スプレッドシートID
@@ -3919,14 +3981,21 @@ class GoogleSheetsSync {
             // シートが存在するか確認（存在しない場合は作成）
             gi_log_error('Creating or accessing sheet', array('sheet_name' => $sheet_name));
             
-            try {
-                // まず、既存シートのデータをクリア（存在する場合）
+            // シート存在確認: 既存シートのリストを取得
+            $sheet_exists = $this->check_sheet_exists($sheet_name);
+            
+            if ($sheet_exists) {
+                // 既存シートのデータをクリア
+                gi_log_error('Sheet exists, clearing data');
                 $clear_range = $sheet_name . '!A:K';
-                $this->clear_sheet_range($clear_range);
-                gi_log_error('Cleared existing sheet data');
-            } catch (Exception $e) {
+                $clear_result = $this->clear_sheet_range($clear_range);
+                
+                if (!$clear_result) {
+                    gi_log_error('Failed to clear existing sheet, will try to write anyway');
+                }
+            } else {
                 // シートが存在しない場合は作成
-                gi_log_error('Sheet does not exist, creating new sheet', array('error' => $e->getMessage()));
+                gi_log_error('Sheet does not exist, creating new sheet');
                 
                 $new_sheet = $this->create_new_sheet(
                     $this->get_spreadsheet_id(),
@@ -3942,7 +4011,7 @@ class GoogleSheetsSync {
                     throw new Exception($error_msg);
                 }
                 
-                gi_log_error('Created new sheet', array('sheet' => $new_sheet));
+                gi_log_error('Created new sheet successfully', array('sheet' => $new_sheet));
             }
             
             // データを書き込み
