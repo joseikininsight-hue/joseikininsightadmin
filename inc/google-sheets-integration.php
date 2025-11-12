@@ -1421,7 +1421,7 @@ class GoogleSheetsSync {
             
             // Nonce検証
             try {
-                check_ajax_referer('gi_sheets_nonce', 'nonce');
+                check_ajax_referer('gi_admin_nonce', 'nonce');
                 gi_log_error('Nonce verification passed');
             } catch (Exception $e) {
                 gi_log_error('Nonce verification failed', array('error' => $e->getMessage()));
@@ -1438,33 +1438,23 @@ class GoogleSheetsSync {
             
             gi_log_error('Permission check passed');
             
-            // 同期方向を取得
-            $sync_direction = isset($_POST['direction']) ? sanitize_text_field($_POST['direction']) : 'both';
+            // 同期方向を取得（sheets_to_wpのみサポート）
+            $sync_direction = isset($_POST['direction']) ? sanitize_text_field($_POST['direction']) : 'sheets_to_wp';
             gi_log_error('Sync direction determined', array('direction' => $sync_direction));
             
-            // 同期処理を実行
-            gi_log_error('Manual sync started', array('direction' => $sync_direction));
-            
-            switch ($sync_direction) {
-                case 'wp_to_sheets':
-                    gi_log_error('Starting WP to Sheets sync');
-                    $this->sync_all_posts_to_sheets();
-                    $message = 'WordPressからスプレッドシートへの同期が完了しました。';
-                    break;
-                
-                case 'sheets_to_wp':
-                    gi_log_error('Starting Sheets to WP sync');
-                    $synced = $this->sync_sheets_to_wp();
-                    $message = "スプレッドシートからWordPressへ {$synced} 件同期しました。";
-                    break;
-                
-                case 'both':
-                default:
-                    gi_log_error('Starting bidirectional sync');
-                    $result = $this->full_bidirectional_sync();
-                    $message = "双方向同期が完了しました。Sheets→WP: {$result['sheets_to_wp']}件、WP→Sheets: {$result['wp_to_sheets']}件";
-                    break;
+            // 双方向同期は廃止されたため、sheets_to_wpのみ実行
+            if ($sync_direction !== 'sheets_to_wp') {
+                gi_log_error('Invalid sync direction', array('direction' => $sync_direction));
+                wp_send_json_error('無効な同期方向です。Sheets→WordPress方向のみサポートされています。');
+                return;
             }
+            
+            // 同期処理を実行
+            gi_log_error('Manual sync started (Sheets to WP only)', array('direction' => $sync_direction));
+            
+            gi_log_error('Starting Sheets to WP sync');
+            $synced = $this->sync_sheets_to_wp();
+            $message = "スプレッドシートからWordPressへ {$synced} 件同期しました。";
             
             // 同期結果をログに記録
             $this->log_sync_result('manual', 'success', $message);
@@ -1540,7 +1530,7 @@ class GoogleSheetsSync {
             'post_data' => $_POST
         ));
         
-        check_ajax_referer('gi_sheets_nonce', 'nonce');
+        check_ajax_referer('gi_admin_nonce', 'nonce');
         
         if (!current_user_can('edit_posts')) {
             gi_log_error('Permission denied for connection test', array('user_id' => get_current_user_id()));
@@ -1626,7 +1616,7 @@ class GoogleSheetsSync {
             ));
             
             // Nonce検証
-            check_ajax_referer('gi_sheets_nonce', 'nonce');
+            check_ajax_referer('gi_admin_nonce', 'nonce');
             
             // 権限チェック
             if (!current_user_can('edit_posts')) {
@@ -1948,7 +1938,7 @@ class GoogleSheetsSync {
             ));
             
             // Nonce検証
-            check_ajax_referer('gi_sheets_nonce', 'nonce');
+            check_ajax_referer('gi_admin_nonce', 'nonce');
             
             // 権限チェック
             if (!current_user_can('edit_posts')) {
@@ -2333,7 +2323,7 @@ class GoogleSheetsSync {
             
             // Nonce検証
             gi_log_error('Starting nonce verification');
-            check_ajax_referer('gi_sheets_nonce', 'nonce');
+            check_ajax_referer('gi_admin_nonce', 'nonce');
             gi_log_error('Nonce verification passed');
             
             // 権限チェック
@@ -4554,7 +4544,7 @@ class SheetsInitializer {
             ));
             
             // Nonce検証
-            check_ajax_referer('gi_sheets_nonce', 'nonce');
+            check_ajax_referer('gi_admin_nonce', 'nonce');
             gi_log_error('Nonce verification passed for initialization');
             
             // 権限チェック
@@ -4611,7 +4601,7 @@ class SheetsInitializer {
      * AJAX: 全投稿エクスポート
      */
     public function ajax_export_all_posts() {
-        check_ajax_referer('gi_sheets_nonce', 'nonce');
+        check_ajax_referer('gi_admin_nonce', 'nonce');
         
         if (!current_user_can('edit_posts')) {
             wp_send_json_error('Permission denied');
@@ -4749,22 +4739,8 @@ class SheetsAdminUI {
         }
         
         // JS読み込みは theme-foundation.php で統合管理（admin.js）
-        
-        $localize_data = array(
-            'ajaxurl' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('gi_sheets_nonce'),
-            'debug' => true, // デバッグモード追加
-            'strings' => array(
-                'testing' => '接続をテスト中...',
-                'syncing' => '同期中...',
-                'success' => '成功',
-                'error' => 'エラー',
-                'confirm_sync' => '同期を実行しますか？この操作により既存のデータが上書きされる可能性があります。'
-            )
-        );
-        
-        
-        wp_localize_script('gi-sheets-admin', 'giSheetsAdmin', $localize_data);
+        // wp_localize_script も theme-foundation.php で実行されるため、ここでは何もしない
+        // Nonce は 'gi_admin_nonce' として theme-foundation.php で作成される
         
         // CSS読み込みは theme-foundation.php で統合管理（admin.css）
     }
@@ -4811,24 +4787,15 @@ class SheetsAdminUI {
                 <h2>手動同期</h2>
                 <div class="gi-sync-controls">
                     <div class="gi-sync-option">
-                        <button type="button" class="button button-primary gi-sync-btn" data-direction="both">
-                            完全同期（双方向）
+                        <button type="button" class="button button-primary gi-sync-btn" data-direction="sheets_to_wp">
+                            <span class="dashicons dashicons-download" style="margin-top: 3px;"></span>
+                            Sheets → WordPress 同期
                         </button>
-                        <p class="description">WordPressとスプレッドシートの両方向で同期します。</p>
-                    </div>
-                    
-                    <div class="gi-sync-option">
-                        <button type="button" class="button gi-sync-btn" data-direction="wp_to_sheets">
-                            WordPress → Sheets
-                        </button>
-                        <p class="description">WordPressの投稿をスプレッドシートに反映します。</p>
-                    </div>
-                    
-                    <div class="gi-sync-option">
-                        <button type="button" class="button gi-sync-btn" data-direction="sheets_to_wp">
-                            Sheets → WordPress
-                        </button>
-                        <p class="description">スプレッドシートの変更をWordPressに反映します。</p>
+                        <p class="description">
+                            <strong>スプレッドシートの変更をWordPressに反映します。</strong><br>
+                            ✅ 新規行の追加、既存投稿の更新、削除（status=deleted）に対応<br>
+                            ⚠️ スプレッドシートの内容がWordPressに上書きされます
+                        </p>
                     </div>
                     
                     <div class="gi-sync-option" style="border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">

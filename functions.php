@@ -497,8 +497,12 @@ add_action('wp_enqueue_scripts', 'gi_enqueue_column_assets');
  * Enqueue Admin Error Fix Script
  * 管理画面のJavaScriptエラーを修正するスクリプトを読み込み
  * 
+ * DISABLED: このファイルは存在しないため一時的に無効化
+ * 必要に応じてadmin.jsに統合済みの機能を使用
+ * 
  * @return void
  */
+/*
 function gi_enqueue_admin_error_fix() {
     wp_enqueue_script(
         'gi-admin-error-fix',
@@ -509,6 +513,7 @@ function gi_enqueue_admin_error_fix() {
     );
 }
 add_action('admin_enqueue_scripts', 'gi_enqueue_admin_error_fix', 1); // Priority 1 to load early
+*/
 
 /**
  * Enqueue Ad Error Handler Script
