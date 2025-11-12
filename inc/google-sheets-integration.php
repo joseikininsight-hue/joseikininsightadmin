@@ -3539,6 +3539,80 @@ class GoogleSheetsSync {
     }
     
     /**
+     * タイトルの類似度を計算（文字単位の一致率）
+     * 
+     * @param string $title1 タイトル1
+     * @param string $title2 タイトル2
+     * @return float 類似度（0.0〜1.0）
+     */
+    private function calculate_title_similarity($title1, $title2) {
+        // 空文字チェック
+        if (empty($title1) || empty($title2)) {
+            return 0.0;
+        }
+        
+        // 同一の場合
+        if ($title1 === $title2) {
+            return 1.0;
+        }
+        
+        // 文字列を配列に分解
+        $chars1 = preg_split('//u', $title1, -1, PREG_SPLIT_NO_EMPTY);
+        $chars2 = preg_split('//u', $title2, -1, PREG_SPLIT_NO_EMPTY);
+        
+        // 共通文字数をカウント
+        $common_chars = array_intersect($chars1, $chars2);
+        $common_count = count($common_chars);
+        
+        // 類似度を計算（共通文字数 / 長い方の文字数）
+        $max_length = max(count($chars1), count($chars2));
+        
+        return $max_length > 0 ? ($common_count / $max_length) : 0.0;
+    }
+    
+    /**
+     * 類似タイトルグループを検出
+     * 
+     * @param array $all_posts すべての投稿
+     * @param float $threshold 類似度閾値（デフォルト0.5 = 50%）
+     * @return array 類似グループの配列
+     */
+    private function find_similar_title_groups($all_posts, $threshold = 0.5) {
+        $groups = array();
+        $processed = array();
+        
+        foreach ($all_posts as $i => $post1) {
+            if (isset($processed[$post1->ID])) {
+                continue;
+            }
+            
+            $group = array($post1);
+            $processed[$post1->ID] = true;
+            
+            // 他の投稿と比較
+            foreach ($all_posts as $j => $post2) {
+                if ($i >= $j || isset($processed[$post2->ID])) {
+                    continue;
+                }
+                
+                $similarity = $this->calculate_title_similarity($post1->post_title, $post2->post_title);
+                
+                if ($similarity >= $threshold) {
+                    $group[] = $post2;
+                    $processed[$post2->ID] = true;
+                }
+            }
+            
+            // グループが2件以上あれば追加
+            if (count($group) > 1) {
+                $groups[] = $group;
+            }
+        }
+        
+        return $groups;
+    }
+    
+    /**
      * 重複タイトルをスプレッドシートにエクスポート
      */
     public function ajax_export_duplicate_titles() {
@@ -3663,10 +3737,90 @@ class GoogleSheetsSync {
                 $group_number++;
             }
             
-            gi_log_error('Prepared export data', array('rows' => count($export_data)));
+            gi_log_error('Prepared exact duplicate data', array('rows' => count($export_data)));
             
-            // 「重複タイトル」シートを作成または取得
-            $sheet_name = '重複タイトル';
+            // 類似タイトルを検出（50%以上一致）
+            $all_posts = get_posts(array(
+                'post_type' => 'grant',
+                'post_status' => array('publish', 'draft', 'private', 'pending'),
+                'posts_per_page' => -1,
+                'orderby' => 'title',
+                'order' => 'ASC'
+            ));
+            
+            gi_log_error('Finding similar titles', array('total_posts' => count($all_posts)));
+            
+            $similar_groups = $this->find_similar_title_groups($all_posts, 0.5);
+            
+            gi_log_error('Found similar title groups', array('groups' => count($similar_groups)));
+            
+            // 類似グループをエクスポートデータに追加
+            if (!empty($similar_groups)) {
+                // セクション区切り
+                $export_data[] = array('', '', '', '', '', '', '', '', '', '', '');
+                $export_data[] = array('=== 類似タイトル（50%以上一致） ===', '', '', '', '', '', '', '', '', '', '');
+                $export_data[] = array('', '', '', '', '', '', '', '', '', '', '');
+                
+                foreach ($similar_groups as $group) {
+                    $is_first_in_group = true;
+                    $group_size = count($group);
+                    
+                    foreach ($group as $post) {
+                        // 都道府県を取得
+                        $prefectures = wp_get_post_terms($post->ID, 'grant_prefecture', array('fields' => 'names'));
+                        $prefecture_names = is_array($prefectures) && !is_wp_error($prefectures) ? implode(', ', $prefectures) : '';
+                        
+                        // 市町村を取得
+                        $municipalities = wp_get_post_terms($post->ID, 'grant_municipality', array('fields' => 'names'));
+                        $municipality_names = is_array($municipalities) && !is_wp_error($municipalities) ? implode(', ', $municipalities) : '';
+                        
+                        // カテゴリを取得
+                        $categories = wp_get_post_terms($post->ID, 'grant_category', array('fields' => 'names'));
+                        $category_names = is_array($categories) && !is_wp_error($categories) ? implode(', ', $categories) : '';
+                        
+                        // ステータスを日本語化
+                        $status_labels = array(
+                            'publish' => '公開',
+                            'draft' => '下書き',
+                            'private' => '非公開',
+                            'pending' => '承認待ち'
+                        );
+                        $status_label = isset($status_labels[$post->post_status]) ? $status_labels[$post->post_status] : $post->post_status;
+                        
+                        // 対処方法の提案
+                        $action_suggestion = '';
+                        if ($is_first_in_group) {
+                            $action_suggestion = '✅ 保持推奨（類似）';
+                            $is_first_in_group = false;
+                        } else {
+                            $action_suggestion = '⚠️ 要確認（類似）';
+                        }
+                        
+                        $export_data[] = array(
+                            '類似' . $group_number,
+                            $post->ID,
+                            $post->post_title,
+                            $status_label,
+                            $post->post_date,
+                            $post->post_modified,
+                            $prefecture_names,
+                            $municipality_names,
+                            $category_names,
+                            $group_size,
+                            $action_suggestion
+                        );
+                    }
+                    
+                    // グループ区切り用の空行
+                    $export_data[] = array('', '', '', '', '', '', '', '', '', '', '');
+                    $group_number++;
+                }
+            }
+            
+            gi_log_error('Prepared all export data', array('rows' => count($export_data), 'similar_groups' => count($similar_groups)));
+            
+            // 「DuplicateTitles」シートを作成または取得（日本語シート名はAPIエラーになるため英語を使用）
+            $sheet_name = 'DuplicateTitles';
             
             // シートが存在するか確認（存在しない場合は作成）
             gi_log_error('Creating or accessing sheet', array('sheet_name' => $sheet_name));
@@ -3711,9 +3865,16 @@ class GoogleSheetsSync {
             if ($result) {
                 $spreadsheet_url = 'https://docs.google.com/spreadsheets/d/' . $this->get_spreadsheet_id() . '/edit';
                 
+                $message = '✅ 完全一致 ' . count($duplicate_titles) . ' グループ';
+                if (!empty($similar_groups)) {
+                    $message .= ' + 類似タイトル ' . count($similar_groups) . ' グループ';
+                }
+                $message .= ' をエクスポートしました';
+                
                 wp_send_json_success(array(
-                    'message' => '✅ 重複タイトル ' . count($duplicate_titles) . ' グループをエクスポートしました',
-                    'count' => count($duplicate_titles),
+                    'message' => $message,
+                    'exact_count' => count($duplicate_titles),
+                    'similar_count' => count($similar_groups),
                     'total_posts' => count($export_data) - 1, // ヘッダー行を除く
                     'spreadsheet_url' => $spreadsheet_url,
                     'sheet_name' => $sheet_name
