@@ -2960,7 +2960,7 @@ class GoogleSheetsSync {
             }
             
             // nonce チェック
-            if (!check_ajax_referer('gi_sheets_nonce', 'nonce', false)) {
+            if (!check_ajax_referer('gi_admin_nonce', 'nonce', false)) {
                 wp_send_json_error('セキュリティチェックに失敗しました。');
                 return;
             }
@@ -3196,7 +3196,7 @@ class GoogleSheetsSync {
             }
             
             // nonce チェック
-            if (!check_ajax_referer('gi_sheets_nonce', 'nonce', false)) {
+            if (!check_ajax_referer('gi_admin_nonce', 'nonce', false)) {
                 wp_send_json_error('セキュリティチェックに失敗しました。');
                 return;
             }
