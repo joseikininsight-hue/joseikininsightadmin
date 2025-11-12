@@ -705,6 +705,7 @@ const GrantInsightAdmin = {
         const exportAllBtn = document.getElementById('export-all-posts');
         const clearSheetBtn = document.getElementById('clear-sheet');
         const exportByIdRangeBtn = document.getElementById('export-by-id-range');
+        const checkDuplicatesBtn = document.getElementById('check-duplicates');
         
         if (initializeBtn) {
             initializeBtn.addEventListener('click', () => this.initializeSheet());
@@ -720,6 +721,10 @@ const GrantInsightAdmin = {
         
         if (exportByIdRangeBtn) {
             exportByIdRangeBtn.addEventListener('click', () => this.exportPostsByIdRange());
+        }
+        
+        if (checkDuplicatesBtn) {
+            checkDuplicatesBtn.addEventListener('click', () => this.checkDuplicateTitles());
         }
     },
 
@@ -847,6 +852,103 @@ const GrantInsightAdmin = {
                 // ボタンを復元
                 btn.disabled = false;
                 btn.innerHTML = originalText;
+            });
+    },
+    
+    /**
+     * 重複タイトルチェック
+     */
+    checkDuplicateTitles() {
+        const btn = document.getElementById('check-duplicates');
+        const resultDiv = document.getElementById('duplicate-check-result');
+        const contentDiv = document.getElementById('duplicate-check-content');
+        
+        if (!btn) return;
+        
+        // ボタンを無効化
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '🔍 チェック中...';
+        
+        // 結果エリアを非表示
+        if (resultDiv) resultDiv.style.display = 'none';
+        
+        const ajaxData = {
+            action: 'gi_check_duplicate_titles',
+            nonce: window.giSheetsAdmin?.nonce
+        };
+
+        this.ajax(ajaxData)
+            .then(response => {
+                if (response.success) {
+                    const data = response.data;
+                    let html = '<strong>' + data.message + '</strong><br><br>';
+                    
+                    if (data.duplicates && data.duplicates.length > 0) {
+                        html += '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+                        html += '<thead><tr style="background: #f9f9f9;">';
+                        html += '<th style="padding: 8px; border: 1px solid #ddd; text-align: left;">タイトル</th>';
+                        html += '<th style="padding: 8px; border: 1px solid #ddd; text-align: center;">重複数</th>';
+                        html += '<th style="padding: 8px; border: 1px solid #ddd; text-align: left;">投稿ID / ステータス / 日付</th>';
+                        html += '</tr></thead><tbody>';
+                        
+                        data.duplicates.forEach(dup => {
+                            html += '<tr>';
+                            html += '<td style="padding: 8px; border: 1px solid #ddd;">' + this.escapeHtml(dup.title) + '</td>';
+                            html += '<td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #d63638;">' + dup.count + '</td>';
+                            html += '<td style="padding: 8px; border: 1px solid #ddd;">';
+                            
+                            dup.posts.forEach((post, index) => {
+                                if (index > 0) html += '<br>';
+                                const statusColors = {
+                                    'publish': '#00a32a',
+                                    'draft': '#2271b1',
+                                    'private': '#dba617',
+                                    'pending': '#999'
+                                };
+                                const color = statusColors[post.status] || '#666';
+                                html += '<strong>ID ' + post.id + '</strong> | ';
+                                html += '<span style="color: ' + color + ';">' + post.status + '</span> | ';
+                                html += post.modified.substring(0, 10);
+                            });
+                            
+                            html += '</td></tr>';
+                        });
+                        
+                        html += '</tbody></table>';
+                        html += '<br><p class="description"><strong>💡 ヒント：</strong>インポート時は、タイトルが一致する既存投稿が自動的に上書きされます。</p>';
+                    }
+                    
+                    if (contentDiv) contentDiv.innerHTML = html;
+                    if (resultDiv) {
+                        resultDiv.className = 'notice ' + (data.duplicates.length > 0 ? 'notice-warning' : 'notice-success');
+                        resultDiv.style.display = 'block';
+                    }
+                    
+                } else {
+                    const errorMsg = response.data || 'チェックに失敗しました';
+                    if (contentDiv) contentDiv.textContent = errorMsg;
+                    if (resultDiv) {
+                        resultDiv.className = 'notice notice-error';
+                        resultDiv.style.display = 'block';
+                    }
+                    this.showNotice('error', errorMsg);
+                }
+            })
+            .catch(error => {
+                console.error('Duplicate check error:', error);
+                const errorMsg = 'ネットワークエラー: ' + error.message;
+                if (contentDiv) contentDiv.textContent = errorMsg;
+                if (resultDiv) {
+                    resultDiv.className = 'notice notice-error';
+                    resultDiv.style.display = 'block';
+                }
+                this.showNotice('error', errorMsg);
+            })
+            .finally(() => {
+                // ボタンを復元
+                btn.disabled = false;
+                btn.textContent = originalText;
             });
     },
 

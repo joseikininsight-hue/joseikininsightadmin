@@ -117,6 +117,7 @@ class GoogleSheetsSync {
         add_action('wp_ajax_gi_export_taxonomies', array($this, 'ajax_export_taxonomies'));
         add_action('wp_ajax_gi_import_taxonomies', array($this, 'ajax_import_taxonomies'));
         add_action('wp_ajax_gi_export_posts_by_id_range', array($this, 'ajax_export_posts_by_id_range')); // 新規追加
+        add_action('wp_ajax_gi_check_duplicate_titles', array($this, 'ajax_check_duplicate_titles')); // 重複チェック
     }
     
     /**
@@ -4806,6 +4807,87 @@ class SheetsInitializer {
     }
     
     /**
+     * 重複タイトルチェック
+     */
+    public function ajax_check_duplicate_titles() {
+        try {
+            gi_log_error('AJAX check duplicate titles request received');
+            
+            // Nonce検証
+            check_ajax_referer('gi_admin_nonce', 'nonce');
+            
+            // 権限チェック
+            if (!current_user_can('edit_posts')) {
+                wp_send_json_error('権限がありません');
+                return;
+            }
+            
+            global $wpdb;
+            
+            // 重複タイトルを検索（SQL直接実行で高速化）
+            $duplicate_titles = $wpdb->get_results("
+                SELECT post_title, COUNT(*) as count
+                FROM {$wpdb->posts}
+                WHERE post_type = 'grant'
+                AND post_status IN ('publish', 'draft', 'private', 'pending')
+                GROUP BY post_title
+                HAVING count > 1
+                ORDER BY count DESC, post_title ASC
+            ");
+            
+            if (empty($duplicate_titles)) {
+                wp_send_json_success(array(
+                    'message' => '✅ 重複タイトルは見つかりませんでした。',
+                    'duplicates' => array()
+                ));
+                return;
+            }
+            
+            // 重複の詳細情報を取得
+            $duplicate_details = array();
+            foreach ($duplicate_titles as $dup) {
+                $posts = get_posts(array(
+                    'post_type' => 'grant',
+                    'post_status' => array('publish', 'draft', 'private', 'pending'),
+                    'title' => $dup->post_title,
+                    'posts_per_page' => -1,
+                    'orderby' => 'ID',
+                    'order' => 'ASC'
+                ));
+                
+                $post_details = array();
+                foreach ($posts as $post) {
+                    $post_details[] = array(
+                        'id' => $post->ID,
+                        'status' => $post->post_status,
+                        'date' => $post->post_date,
+                        'modified' => $post->post_modified
+                    );
+                }
+                
+                $duplicate_details[] = array(
+                    'title' => $dup->post_title,
+                    'count' => $dup->count,
+                    'posts' => $post_details
+                );
+            }
+            
+            gi_log_error('Duplicate titles found', array('count' => count($duplicate_titles)));
+            
+            wp_send_json_success(array(
+                'message' => '⚠️ ' . count($duplicate_titles) . ' 件の重複タイトルが見つかりました。',
+                'duplicates' => $duplicate_details
+            ));
+            
+        } catch (Exception $e) {
+            gi_log_error('Duplicate check failed', array(
+                'error' => $e->getMessage()
+            ));
+            wp_send_json_error('チェックに失敗しました: ' . $e->getMessage());
+        }
+    }
+    
+    /**
      * スプレッドシートをクリア
      */
     public function clear_sheet() {
@@ -5007,6 +5089,17 @@ class SheetsAdminUI {
                         </button>
                         <p class="description">スプレッドシートからタクソノミーを読み込み、作成・更新・削除します。<strong>注意：</strong>削除する場合は名前列に「DELETE」または「削除」と入力してください。</p>
                     </div>
+                    
+                    <div class="gi-sync-option" style="border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
+                        <button type="button" class="button button-secondary" id="check-duplicates">
+                            🔍 重複タイトルチェック
+                        </button>
+                        <p class="description">
+                            <strong>WordPress内の重複したタイトルを検出します。</strong><br>
+                            ✅ 同じタイトルの投稿が複数存在する場合にリスト表示<br>
+                            💡 インポート時は自動的に重複チェックが実行され、既存投稿が上書きされます
+                        </p>
+                    </div>
                 </div>
                 
                 <div id="sync-result" style="display: none;">
@@ -5015,9 +5108,9 @@ class SheetsAdminUI {
                     </div>
                 </div>
                 
-                <div id="field-test-result" style="display: none;">
+                <div id="duplicate-check-result" style="display: none;">
                     <div class="notice">
-                        <div id="field-test-content"></div>
+                        <div id="duplicate-check-content"></div>
                     </div>
                 </div>
             </div>
