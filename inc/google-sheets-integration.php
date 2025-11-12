@@ -112,10 +112,11 @@ class GoogleSheetsSync {
         add_action('wp_ajax_gi_manual_sheets_sync', array($this, 'ajax_manual_sync'));
         add_action('wp_ajax_gi_test_sheets_connection', array($this, 'ajax_test_connection'));
         add_action('wp_ajax_gi_setup_field_validation', array($this, 'ajax_setup_field_validation'));
-        add_action('wp_ajax_gi_test_specific_fields', array($this, 'ajax_test_specific_fields'));
+        // フィールド同期テストは削除: add_action('wp_ajax_gi_test_specific_fields', array($this, 'ajax_test_specific_fields'));
         add_action('wp_ajax_gi_export_invalid_prefectures', array($this, 'ajax_export_invalid_prefectures'));
         add_action('wp_ajax_gi_export_taxonomies', array($this, 'ajax_export_taxonomies'));
         add_action('wp_ajax_gi_import_taxonomies', array($this, 'ajax_import_taxonomies'));
+        add_action('wp_ajax_gi_export_posts_by_id_range', array($this, 'ajax_export_posts_by_id_range')); // 新規追加
     }
     
     /**
@@ -916,11 +917,15 @@ class GoogleSheetsSync {
     // 自動削除・ステータス変更同期メソッドは削除されました
     
     /**
-     * スプレッドシートからWordPressへの同期
+     * スプレッドシートからWordPressへの同期（バッチ処理強化版）
      */
     public function sync_sheets_to_wp() {
         try {
-            gi_log_error('Starting sync_sheets_to_wp');
+            gi_log_error('Starting sync_sheets_to_wp with enhanced batch processing');
+            
+            // メモリとタイムアウトを拡張
+            @ini_set('memory_limit', '512M');
+            @set_time_limit(600); // 10分
             
             $sheet_data = $this->read_sheet_data();
             if (empty($sheet_data)) {
@@ -933,67 +938,148 @@ class GoogleSheetsSync {
             $headers = array_shift($sheet_data); // ヘッダー行を除去
             $synced_count = 0;
             $new_post_ids_to_update = array(); // 新規作成された投稿のIDと行番号を記録
+            $batch_size = 20; // バッチサイズ（一度に処理する行数）
+            $batch_count = 0;
+            
+            // バッチ処理で確実にインポート
+            $total_rows = count($sheet_data);
+            gi_log_error('Starting batch import', array('total_rows' => $total_rows, 'batch_size' => $batch_size));
         
         foreach ($sheet_data as $row_index => $row) {
-            if (empty($row) || count($row) < 5) {
-                continue; // 不完全な行をスキップ
-            }
-            
-            $original_post_id = intval($row[0]); // 元のpost_id（空の場合は0）
-            $post_id = $original_post_id;
-            $title = isset($row[1]) ? sanitize_text_field($row[1]) : '';
-            // HTML/CSS完全版を保持（管理者権限でのインポートなのでフィルタリングなし）
-            $content = isset($row[2]) ? $row[2] : '';
-            $excerpt = isset($row[3]) ? sanitize_textarea_field($row[3]) : '';
-            $status = isset($row[4]) ? sanitize_text_field($row[4]) : 'draft';
-            
-            // 削除されたアイテムの処理
-            if ($status === 'deleted') {
-                if ($post_id && get_post($post_id)) {
-                    wp_delete_post($post_id, true);
-                    $synced_count++;
+            try {
+                if (empty($row) || count($row) < 2) {
+                    gi_log_error('Skipping incomplete row', array('row_index' => $row_index));
+                    continue; // 不完全な行をスキップ
                 }
-                continue;
-            }
-            
-            $was_new_post = false; // 新規投稿かどうかのフラグ
-            
-            // 既存投稿の更新または新規作成
-            if ($post_id && get_post($post_id)) {
-                // 既存投稿を更新
-                $updated_post = array(
-                    'ID' => $post_id,
-                    'post_title' => $title,
-                    'post_content' => $content,
-                    'post_excerpt' => $excerpt,
-                    'post_status' => $status,
-                );
                 
-                wp_update_post($updated_post);
-                gi_log_error('Updated existing post', array('post_id' => $post_id, 'title' => $title));
-            } else {
-                // 新規投稿を作成
-                $new_post = array(
-                    'post_title' => $title,
-                    'post_content' => $content,
-                    'post_excerpt' => $excerpt,
-                    'post_status' => $status,
-                    'post_type' => 'grant'
-                );
+                $original_post_id = intval($row[0]); // 元のpost_id（空の場合は0）
+                $post_id = $original_post_id;
+                $title = isset($row[1]) ? sanitize_text_field($row[1]) : '';
                 
-                $post_id = wp_insert_post($new_post);
-                $was_new_post = true;
+                if (empty($title)) {
+                    gi_log_error('Skipping row with empty title', array('row_index' => $row_index));
+                    continue;
+                }
                 
-                if ($post_id && !is_wp_error($post_id)) {
-                    // 新規投稿が作成されたので、後でスプレッドシートのA列を更新する必要がある
-                    $sheet_row_number = $row_index + 2; // ヘッダー行を考慮して+2（配列は0ベース、Sheetsは1ベース+ヘッダー）
+                // HTML/CSS完全版を保持（管理者権限でのインポートなのでフィルタリングなし）
+                $content = isset($row[2]) ? $row[2] : '';
+                $excerpt = isset($row[3]) ? sanitize_textarea_field($row[3]) : '';
+                $status = isset($row[4]) ? sanitize_text_field($row[4]) : 'draft';
+                
+                // 削除されたアイテムの処理
+                if ($status === 'deleted') {
+                    if ($post_id && get_post($post_id)) {
+                        wp_delete_post($post_id, true);
+                        $synced_count++;
+                        gi_log_error('Deleted post', array('post_id' => $post_id));
+                    }
+                    continue;
+                }
+                
+                $was_new_post = false; // 新規投稿かどうかのフラグ
+                
+                // タイトル重複チェック：B列タイトルで既存投稿を検索
+                $existing_post_by_title = null;
+                if (empty($post_id) || !get_post($post_id)) {
+                    // A列にIDがない場合、タイトルで検索
+                    $existing_posts = get_posts(array(
+                        'post_type' => 'grant',
+                        'post_status' => array('publish', 'draft', 'private', 'pending'),
+                        'title' => $title,
+                        'posts_per_page' => 1,
+                        'fields' => 'ids'
+                    ));
+                    
+                    if (!empty($existing_posts)) {
+                        $existing_post_by_title = $existing_posts[0];
+                        gi_log_error('Found existing post by title', array(
+                            'title' => $title,
+                            'existing_post_id' => $existing_post_by_title
+                        ));
+                    }
+                }
+                
+                // 既存投稿の更新または新規作成
+                if ($post_id && get_post($post_id)) {
+                    // A列にIDがあり、投稿が存在する場合：既存投稿を更新
+                    $updated_post = array(
+                        'ID' => $post_id,
+                        'post_title' => $title,
+                        'post_content' => $content,
+                        'post_excerpt' => $excerpt,
+                        'post_status' => $status,
+                    );
+                    
+                    wp_update_post($updated_post);
+                    gi_log_error('Updated existing post by ID', array('post_id' => $post_id, 'title' => $title));
+                    
+                } elseif ($existing_post_by_title) {
+                    // タイトルで既存投稿が見つかった場合：上書き
+                    $post_id = $existing_post_by_title;
+                    $updated_post = array(
+                        'ID' => $post_id,
+                        'post_title' => $title,
+                        'post_content' => $content,
+                        'post_excerpt' => $excerpt,
+                        'post_status' => $status,
+                    );
+                    
+                    wp_update_post($updated_post);
+                    
+                    // A列のIDを更新するために記録
+                    $sheet_row_number = $row_index + 2;
                     $new_post_ids_to_update[$sheet_row_number] = $post_id;
-                    gi_log_error('Created new post, will update spreadsheet', array(
-                        'post_id' => $post_id, 
-                        'title' => $title, 
+                    
+                    gi_log_error('Overwritten existing post by title', array(
+                        'post_id' => $post_id,
+                        'title' => $title,
                         'sheet_row' => $sheet_row_number
                     ));
+                    
+                } else {
+                    // 新規投稿を作成
+                    $new_post = array(
+                        'post_title' => $title,
+                        'post_content' => $content,
+                        'post_excerpt' => $excerpt,
+                        'post_status' => $status,
+                        'post_type' => 'grant'
+                    );
+                    
+                    $post_id = wp_insert_post($new_post);
+                    $was_new_post = true;
+                    
+                    if ($post_id && !is_wp_error($post_id)) {
+                        // 新規投稿が作成されたので、後でスプレッドシートのA列を更新する必要がある
+                        $sheet_row_number = $row_index + 2; // ヘッダー行を考慮して+2（配列は0ベース、Sheetsは1ベース+ヘッダー）
+                        $new_post_ids_to_update[$sheet_row_number] = $post_id;
+                        gi_log_error('Created new post, will update spreadsheet', array(
+                            'post_id' => $post_id, 
+                            'title' => $title, 
+                            'sheet_row' => $sheet_row_number
+                        ));
+                    }
                 }
+                
+                // バッチ処理カウント
+                $batch_count++;
+                if ($batch_count % $batch_size === 0) {
+                    gi_log_error('Batch progress', array(
+                        'processed' => $batch_count,
+                        'total' => $total_rows,
+                        'percentage' => round(($batch_count / $total_rows) * 100, 2)
+                    ));
+                    
+                    // メモリをクリア
+                    wp_cache_flush();
+                }
+                
+            } catch (Exception $e) {
+                gi_log_error('Error processing row', array(
+                    'row_index' => $row_index,
+                    'error' => $e->getMessage()
+                ));
+                continue; // エラーが発生しても次の行に進む
             }
             
             if ($post_id && !is_wp_error($post_id)) {
@@ -4617,6 +4703,109 @@ class SheetsInitializer {
     }
     
     /**
+     * 投稿ID範囲指定エクスポートのAJAXハンドラー
+     */
+    public function ajax_export_posts_by_id_range() {
+        check_ajax_referer('gi_admin_nonce', 'nonce');
+        
+        if (!current_user_can('edit_posts')) {
+            wp_send_json_error('権限がありません');
+            return;
+        }
+        
+        try {
+            // 入力値の取得とバリデーション
+            $start_id = isset($_POST['start_id']) ? intval($_POST['start_id']) : 0;
+            $end_id = isset($_POST['end_id']) ? intval($_POST['end_id']) : 0;
+            
+            if ($start_id <= 0 || $end_id <= 0) {
+                wp_send_json_error('開始IDと終了IDは1以上の整数を指定してください');
+                return;
+            }
+            
+            if ($start_id > $end_id) {
+                wp_send_json_error('開始IDは終了ID以下にしてください');
+                return;
+            }
+            
+            gi_log_error('Starting ID range export', array(
+                'start_id' => $start_id,
+                'end_id' => $end_id
+            ));
+            
+            // 範囲内の投稿を取得
+            $posts = get_posts(array(
+                'post_type' => 'grant',
+                'post_status' => array('publish', 'draft', 'private'),
+                'posts_per_page' => -1,
+                'orderby' => 'ID',
+                'order' => 'ASC',
+                'post__in' => range($start_id, $end_id)
+            ));
+            
+            if (empty($posts)) {
+                wp_send_json_error("ID {$start_id} 〜 {$end_id} の範囲に投稿が見つかりませんでした");
+                return;
+            }
+            
+            gi_log_error('Found posts in range', array('count' => count($posts)));
+            
+            // GoogleSheetsSyncインスタンスを取得
+            if (!$this->sheets_sync) {
+                $this->sheets_sync = GoogleSheetsSync::getInstance();
+            }
+            
+            // エクスポートデータを準備
+            $export_data = array();
+            foreach ($posts as $post) {
+                $row_data = $this->sheets_sync->convert_post_to_sheet_row($post->ID);
+                if ($row_data) {
+                    $export_data[] = $row_data;
+                }
+            }
+            
+            if (empty($export_data)) {
+                wp_send_json_error('エクスポート可能なデータがありませんでした');
+                return;
+            }
+            
+            // スプレッドシートに書き込み（既存データに追記）
+            $sheet_name = $this->sheets_sync->get_sheet_name();
+            
+            // 既存データの最終行を取得
+            $existing_data = $this->sheets_sync->read_sheet_data();
+            $next_row = count($existing_data) + 1; // ヘッダー行を含む
+            
+            $end_row = $next_row + count($export_data) - 1;
+            $range = "{$sheet_name}!A{$next_row}:AE{$end_row}";
+            
+            gi_log_error('Writing to sheet', array(
+                'range' => $range,
+                'rows' => count($export_data)
+            ));
+            
+            $result = $this->sheets_sync->write_sheet_data($range, $export_data);
+            
+            if ($result) {
+                wp_send_json_success(array(
+                    'message' => "ID {$start_id} 〜 {$end_id} の範囲の投稿 " . count($posts) . " 件をスプレッドシートにエクスポートしました",
+                    'count' => count($posts),
+                    'start_id' => $start_id,
+                    'end_id' => $end_id
+                ));
+            } else {
+                wp_send_json_error('スプレッドシートへの書き込みに失敗しました');
+            }
+            
+        } catch (Exception $e) {
+            gi_log_error('ID range export failed', array(
+                'error' => $e->getMessage()
+            ));
+            wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
+        }
+    }
+    
+    /**
      * スプレッドシートをクリア
      */
     public function clear_sheet() {
@@ -4799,13 +4988,6 @@ class SheetsAdminUI {
                     </div>
                     
                     <div class="gi-sync-option" style="border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
-                        <button type="button" class="button button-secondary" id="test-specific-fields">
-                            🔍 フィールド同期テスト
-                        </button>
-                        <p class="description">都道府県・カテゴリ・対象市町村フィールドの同期状態をテストします。</p>
-                    </div>
-                    
-                    <div class="gi-sync-option" style="border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
                         <button type="button" class="button button-secondary" id="export-invalid-prefectures">
                             🗾 都道府県データ検証・エクスポート
                         </button>
@@ -4842,10 +5024,10 @@ class SheetsAdminUI {
             
             <!-- スプレッドシート初期化カード -->
             <div class="gi-sheets-card">
-                <h2>スプレッドシート初期化</h2>
+                <h2>スプレッドシート初期化・エクスポート</h2>
                 <div class="gi-init-controls">
                     <p class="description">
-                        スプレッドシートにヘッダー行を設定し、既存の投稿データをエクスポートします。
+                        スプレッドシートにヘッダー行を設定し、投稿データをエクスポートします。
                     </p>
                     <div class="gi-init-actions">
                         <button type="button" id="initialize-sheet" class="button button-primary">
@@ -4857,6 +5039,33 @@ class SheetsAdminUI {
                         <button type="button" id="clear-sheet" class="button button-secondary gi-danger">
                             スプレッドシートをクリア
                         </button>
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
+                        <h3>📋 投稿ID範囲指定エクスポート</h3>
+                        <p class="description">
+                            特定の投稿ID範囲をスプレッドシートにエクスポートします。<br>
+                            例：ID 100〜200 の投稿のみをエクスポート
+                        </p>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+                            <label>
+                                開始ID:
+                                <input type="number" id="export-id-start" min="1" placeholder="例: 100" style="width: 100px;">
+                            </label>
+                            <label>
+                                終了ID:
+                                <input type="number" id="export-id-end" min="1" placeholder="例: 200" style="width: 100px;">
+                            </label>
+                            <button type="button" id="export-by-id-range" class="button button-secondary">
+                                <span class="dashicons dashicons-upload" style="margin-top: 3px;"></span>
+                                範囲エクスポート
+                            </button>
+                        </div>
+                        <div id="id-range-export-result" style="display: none; margin-top: 10px;">
+                            <div class="notice">
+                                <p id="id-range-export-message"></p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -704,6 +704,7 @@ const GrantInsightAdmin = {
         const initializeBtn = document.getElementById('initialize-sheet');
         const exportAllBtn = document.getElementById('export-all-posts');
         const clearSheetBtn = document.getElementById('clear-sheet');
+        const exportByIdRangeBtn = document.getElementById('export-by-id-range');
         
         if (initializeBtn) {
             initializeBtn.addEventListener('click', () => this.initializeSheet());
@@ -715,6 +716,10 @@ const GrantInsightAdmin = {
         
         if (clearSheetBtn) {
             clearSheetBtn.addEventListener('click', () => this.clearSheet());
+        }
+        
+        if (exportByIdRangeBtn) {
+            exportByIdRangeBtn.addEventListener('click', () => this.exportPostsByIdRange());
         }
     },
 
@@ -749,6 +754,100 @@ const GrantInsightAdmin = {
         }
         
         this.executeSheetOperation('clear-sheet', 'gi_clear_sheet', 'クリア中...');
+    },
+
+    /**
+     * 投稿ID範囲指定エクスポート
+     */
+    exportPostsByIdRange() {
+        const startIdInput = document.getElementById('export-id-start');
+        const endIdInput = document.getElementById('export-id-end');
+        const btn = document.getElementById('export-by-id-range');
+        const resultDiv = document.getElementById('id-range-export-result');
+        const messageDiv = document.getElementById('id-range-export-message');
+        
+        if (!startIdInput || !endIdInput || !btn) return;
+        
+        const startId = parseInt(startIdInput.value);
+        const endId = parseInt(endIdInput.value);
+        
+        // バリデーション
+        if (!startId || !endId || startId <= 0 || endId <= 0) {
+            this.showNotice('error', '開始IDと終了IDを入力してください');
+            return;
+        }
+        
+        if (startId > endId) {
+            this.showNotice('error', '開始IDは終了ID以下にしてください');
+            return;
+        }
+        
+        // 確認ダイアログ
+        if (!confirm(`ID ${startId} 〜 ${endId} の範囲の投稿をスプレッドシートにエクスポートしますか？`)) {
+            return;
+        }
+        
+        // ボタンを無効化
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="dashicons dashicons-update" style="margin-top: 3px; animation: rotation 1s infinite linear;"></span> エクスポート中...';
+        
+        // 結果エリアを非表示
+        if (resultDiv) resultDiv.style.display = 'none';
+        
+        const ajaxData = {
+            action: 'gi_export_posts_by_id_range',
+            nonce: window.giSheetsAdmin?.nonce,
+            start_id: startId,
+            end_id: endId
+        };
+
+        this.ajax(ajaxData, { timeout: 120000 })
+            .then(response => {
+                if (response.success) {
+                    const data = response.data;
+                    const message = data.message || `${data.count} 件の投稿をエクスポートしました`;
+                    
+                    if (messageDiv) messageDiv.textContent = message;
+                    if (resultDiv) {
+                        resultDiv.className = 'notice notice-success';
+                        resultDiv.style.display = 'block';
+                    }
+                    
+                    this.showNotice('success', message);
+                    
+                    // 入力フィールドをクリア
+                    startIdInput.value = '';
+                    endIdInput.value = '';
+                } else {
+                    const errorMsg = response.data || 'エクスポートに失敗しました';
+                    
+                    if (messageDiv) messageDiv.textContent = errorMsg;
+                    if (resultDiv) {
+                        resultDiv.className = 'notice notice-error';
+                        resultDiv.style.display = 'block';
+                    }
+                    
+                    this.showNotice('error', errorMsg);
+                }
+            })
+            .catch(error => {
+                console.error('ID range export error:', error);
+                const errorMsg = 'ネットワークエラー: ' + error.message;
+                
+                if (messageDiv) messageDiv.textContent = errorMsg;
+                if (resultDiv) {
+                    resultDiv.className = 'notice notice-error';
+                    resultDiv.style.display = 'block';
+                }
+                
+                this.showNotice('error', errorMsg);
+            })
+            .finally(() => {
+                // ボタンを復元
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            });
     },
 
     /**

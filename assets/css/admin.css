@@ -1124,3 +1124,32 @@
         border: 1px solid #000;
     }
 }
+
+/* ===============================================
+   投稿ID範囲エクスポート用のアニメーション
+   =============================================== */
+@keyframes rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* ID範囲エクスポート結果表示 */
+#id-range-export-result {
+    margin-top: 10px;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
