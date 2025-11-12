@@ -3681,6 +3681,104 @@ class GoogleSheetsSync {
             wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
         }
     }
+    
+    /**
+     * 投稿ID範囲指定エクスポートのAJAXハンドラー
+     */
+    public function ajax_export_posts_by_id_range() {
+        check_ajax_referer('gi_admin_nonce', 'nonce');
+        
+        if (!current_user_can('edit_posts')) {
+            wp_send_json_error('権限がありません');
+            return;
+        }
+        
+        try {
+            // 入力値の取得とバリデーション
+            $start_id = isset($_POST['start_id']) ? intval($_POST['start_id']) : 0;
+            $end_id = isset($_POST['end_id']) ? intval($_POST['end_id']) : 0;
+            
+            if ($start_id <= 0 || $end_id <= 0) {
+                wp_send_json_error('開始IDと終了IDは1以上の整数を指定してください');
+                return;
+            }
+            
+            if ($start_id > $end_id) {
+                wp_send_json_error('開始IDは終了ID以下にしてください');
+                return;
+            }
+            
+            gi_log_error('Starting ID range export', array(
+                'start_id' => $start_id,
+                'end_id' => $end_id
+            ));
+            
+            // 範囲内の投稿を取得
+            $posts = get_posts(array(
+                'post_type' => 'grant',
+                'post_status' => array('publish', 'draft', 'private'),
+                'posts_per_page' => -1,
+                'orderby' => 'ID',
+                'order' => 'ASC',
+                'post__in' => range($start_id, $end_id)
+            ));
+            
+            if (empty($posts)) {
+                wp_send_json_error("ID {$start_id} 〜 {$end_id} の範囲に投稿が見つかりませんでした");
+                return;
+            }
+            
+            gi_log_error('Found posts in range', array('count' => count($posts)));
+            
+            // エクスポートデータを準備
+            $export_data = array();
+            foreach ($posts as $post) {
+                $row_data = $this->convert_post_to_sheet_row($post->ID);
+                if ($row_data) {
+                    $export_data[] = $row_data;
+                }
+            }
+            
+            if (empty($export_data)) {
+                wp_send_json_error('エクスポート可能なデータがありませんでした');
+                return;
+            }
+            
+            // スプレッドシートに書き込み（既存データに追記）
+            $sheet_name = $this->get_sheet_name();
+            
+            // 既存データの最終行を取得
+            $existing_data = $this->read_sheet_data();
+            $next_row = count($existing_data) + 1; // ヘッダー行を含む
+            
+            $end_row = $next_row + count($export_data) - 1;
+            $range = "{$sheet_name}!A{$next_row}:AE{$end_row}";
+            
+            gi_log_error('Writing to sheet', array(
+                'range' => $range,
+                'rows' => count($export_data)
+            ));
+            
+            $result = $this->write_sheet_data($range, $export_data);
+            
+            if ($result) {
+                wp_send_json_success(array(
+                    'message' => "ID {$start_id} 〜 {$end_id} の範囲の投稿 " . count($posts) . " 件をスプレッドシートにエクスポートしました",
+                    'count' => count($posts),
+                    'start_id' => $start_id,
+                    'end_id' => $end_id
+                ));
+            } else {
+                wp_send_json_error('スプレッドシートへの書き込みに失敗しました');
+            }
+            
+        } catch (Exception $e) {
+            gi_log_error('ID range export failed', array(
+                'error' => $e->getMessage()
+            ));
+            wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
+        }
+    }
 }
 
 /**
@@ -4980,109 +5078,6 @@ class SheetsInitializer {
             wp_send_json_success('全投稿をスプレッドシートにエクスポートしました');
             
         } catch (Exception $e) {
-            wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * 投稿ID範囲指定エクスポートのAJAXハンドラー
-     */
-    public function ajax_export_posts_by_id_range() {
-        check_ajax_referer('gi_admin_nonce', 'nonce');
-        
-        if (!current_user_can('edit_posts')) {
-            wp_send_json_error('権限がありません');
-            return;
-        }
-        
-        try {
-            // 入力値の取得とバリデーション
-            $start_id = isset($_POST['start_id']) ? intval($_POST['start_id']) : 0;
-            $end_id = isset($_POST['end_id']) ? intval($_POST['end_id']) : 0;
-            
-            if ($start_id <= 0 || $end_id <= 0) {
-                wp_send_json_error('開始IDと終了IDは1以上の整数を指定してください');
-                return;
-            }
-            
-            if ($start_id > $end_id) {
-                wp_send_json_error('開始IDは終了ID以下にしてください');
-                return;
-            }
-            
-            gi_log_error('Starting ID range export', array(
-                'start_id' => $start_id,
-                'end_id' => $end_id
-            ));
-            
-            // 範囲内の投稿を取得
-            $posts = get_posts(array(
-                'post_type' => 'grant',
-                'post_status' => array('publish', 'draft', 'private'),
-                'posts_per_page' => -1,
-                'orderby' => 'ID',
-                'order' => 'ASC',
-                'post__in' => range($start_id, $end_id)
-            ));
-            
-            if (empty($posts)) {
-                wp_send_json_error("ID {$start_id} 〜 {$end_id} の範囲に投稿が見つかりませんでした");
-                return;
-            }
-            
-            gi_log_error('Found posts in range', array('count' => count($posts)));
-            
-            // GoogleSheetsSyncインスタンスを取得
-            if (!$this->sheets_sync) {
-                $this->sheets_sync = GoogleSheetsSync::getInstance();
-            }
-            
-            // エクスポートデータを準備
-            $export_data = array();
-            foreach ($posts as $post) {
-                $row_data = $this->sheets_sync->convert_post_to_sheet_row($post->ID);
-                if ($row_data) {
-                    $export_data[] = $row_data;
-                }
-            }
-            
-            if (empty($export_data)) {
-                wp_send_json_error('エクスポート可能なデータがありませんでした');
-                return;
-            }
-            
-            // スプレッドシートに書き込み（既存データに追記）
-            $sheet_name = $this->sheets_sync->get_sheet_name();
-            
-            // 既存データの最終行を取得
-            $existing_data = $this->sheets_sync->read_sheet_data();
-            $next_row = count($existing_data) + 1; // ヘッダー行を含む
-            
-            $end_row = $next_row + count($export_data) - 1;
-            $range = "{$sheet_name}!A{$next_row}:AE{$end_row}";
-            
-            gi_log_error('Writing to sheet', array(
-                'range' => $range,
-                'rows' => count($export_data)
-            ));
-            
-            $result = $this->sheets_sync->write_sheet_data($range, $export_data);
-            
-            if ($result) {
-                wp_send_json_success(array(
-                    'message' => "ID {$start_id} 〜 {$end_id} の範囲の投稿 " . count($posts) . " 件をスプレッドシートにエクスポートしました",
-                    'count' => count($posts),
-                    'start_id' => $start_id,
-                    'end_id' => $end_id
-                ));
-            } else {
-                wp_send_json_error('スプレッドシートへの書き込みに失敗しました');
-            }
-            
-        } catch (Exception $e) {
-            gi_log_error('ID range export failed', array(
-                'error' => $e->getMessage()
-            ));
             wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
         }
     }
