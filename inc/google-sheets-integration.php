@@ -3401,6 +3401,271 @@ class GoogleSheetsSync {
             wp_send_json_error('インポートに失敗しました（Fatal Error）: ' . $e->getMessage());
         }
     }
+    
+    /**
+     * 重複タイトルチェック
+     */
+    public function ajax_check_duplicate_titles() {
+        try {
+            gi_log_error('AJAX check duplicate titles request received');
+            
+            // Nonce検証
+            check_ajax_referer('gi_admin_nonce', 'nonce');
+            
+            // 権限チェック
+            if (!current_user_can('edit_posts')) {
+                wp_send_json_error('権限がありません');
+                return;
+            }
+            
+            global $wpdb;
+            
+            // 重複タイトルを検索（SQL直接実行で高速化）
+            $duplicate_titles = $wpdb->get_results("
+                SELECT post_title, COUNT(*) as count
+                FROM {$wpdb->posts}
+                WHERE post_type = 'grant'
+                AND post_status IN ('publish', 'draft', 'private', 'pending')
+                GROUP BY post_title
+                HAVING count > 1
+                ORDER BY count DESC, post_title ASC
+            ");
+            
+            if (empty($duplicate_titles)) {
+                wp_send_json_success(array(
+                    'message' => '✅ 重複タイトルは見つかりませんでした。',
+                    'duplicates' => array()
+                ));
+                return;
+            }
+            
+            // 重複の詳細情報を取得
+            $duplicate_details = array();
+            foreach ($duplicate_titles as $dup) {
+                $posts = get_posts(array(
+                    'post_type' => 'grant',
+                    'post_status' => array('publish', 'draft', 'private', 'pending'),
+                    'title' => $dup->post_title,
+                    'posts_per_page' => -1,
+                    'orderby' => 'ID',
+                    'order' => 'ASC'
+                ));
+                
+                $post_details = array();
+                foreach ($posts as $post) {
+                    $post_details[] = array(
+                        'id' => $post->ID,
+                        'status' => $post->post_status,
+                        'date' => $post->post_date,
+                        'modified' => $post->post_modified
+                    );
+                }
+                
+                $duplicate_details[] = array(
+                    'title' => $dup->post_title,
+                    'count' => $dup->count,
+                    'posts' => $post_details
+                );
+            }
+            
+            gi_log_error('Duplicate titles found', array('count' => count($duplicate_titles)));
+            
+            wp_send_json_success(array(
+                'message' => '⚠️ ' . count($duplicate_titles) . ' 件の重複タイトルが見つかりました。',
+                'duplicates' => $duplicate_details
+            ));
+            
+        } catch (Exception $e) {
+            gi_log_error('Duplicate check failed', array(
+                'error' => $e->getMessage()
+            ));
+            wp_send_json_error('チェックに失敗しました: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * 重複タイトルをスプレッドシートにエクスポート
+     */
+    public function ajax_export_duplicate_titles() {
+        try {
+            gi_log_error('AJAX export duplicate titles request received');
+            
+            // Nonce検証
+            check_ajax_referer('gi_admin_nonce', 'nonce');
+            
+            // 権限チェック
+            if (!current_user_can('edit_posts')) {
+                wp_send_json_error('権限がありません');
+                return;
+            }
+            
+            // メモリ制限を拡張
+            @ini_set('memory_limit', '512M');
+            @set_time_limit(300);
+            
+            global $wpdb;
+            
+            // 重複タイトルを検索
+            $duplicate_titles = $wpdb->get_results("
+                SELECT post_title, COUNT(*) as count
+                FROM {$wpdb->posts}
+                WHERE post_type = 'grant'
+                AND post_status IN ('publish', 'draft', 'private', 'pending')
+                GROUP BY post_title
+                HAVING count > 1
+                ORDER BY count DESC, post_title ASC
+            ");
+            
+            if (empty($duplicate_titles)) {
+                wp_send_json_success(array(
+                    'message' => '✅ 重複タイトルは見つかりませんでした。',
+                    'count' => 0
+                ));
+                return;
+            }
+            
+            gi_log_error('Found duplicate titles', array('count' => count($duplicate_titles)));
+            
+            // スプレッドシートに書き込むデータを準備
+            $export_data = array();
+            
+            // ヘッダー行
+            $export_data[] = array(
+                '重複グループ',
+                '投稿ID',
+                'タイトル',
+                'ステータス',
+                '作成日',
+                '更新日',
+                '都道府県',
+                '市町村',
+                'カテゴリ',
+                '重複数',
+                '対処方法'
+            );
+            
+            // 重複の詳細データを取得
+            $group_number = 1;
+            foreach ($duplicate_titles as $dup) {
+                $posts = get_posts(array(
+                    'post_type' => 'grant',
+                    'post_status' => array('publish', 'draft', 'private', 'pending'),
+                    'title' => $dup->post_title,
+                    'posts_per_page' => -1,
+                    'orderby' => 'ID',
+                    'order' => 'ASC'
+                ));
+                
+                $is_first_in_group = true;
+                foreach ($posts as $post) {
+                    // 都道府県を取得
+                    $prefectures = wp_get_post_terms($post->ID, 'grant_prefecture', array('fields' => 'names'));
+                    $prefecture_names = is_array($prefectures) && !is_wp_error($prefectures) ? implode(', ', $prefectures) : '';
+                    
+                    // 市町村を取得
+                    $municipalities = wp_get_post_terms($post->ID, 'grant_municipality', array('fields' => 'names'));
+                    $municipality_names = is_array($municipalities) && !is_wp_error($municipalities) ? implode(', ', $municipalities) : '';
+                    
+                    // カテゴリを取得
+                    $categories = wp_get_post_terms($post->ID, 'grant_category', array('fields' => 'names'));
+                    $category_names = is_array($categories) && !is_wp_error($categories) ? implode(', ', $categories) : '';
+                    
+                    // ステータスを日本語化
+                    $status_labels = array(
+                        'publish' => '公開',
+                        'draft' => '下書き',
+                        'private' => '非公開',
+                        'pending' => '承認待ち'
+                    );
+                    $status_label = isset($status_labels[$post->post_status]) ? $status_labels[$post->post_status] : $post->post_status;
+                    
+                    // 対処方法の提案
+                    $action_suggestion = '';
+                    if ($is_first_in_group) {
+                        $action_suggestion = '✅ 保持推奨（最古/最新を選択）';
+                        $is_first_in_group = false;
+                    } else {
+                        $action_suggestion = '❌ 削除候補（E列をdeletedに変更）';
+                    }
+                    
+                    $export_data[] = array(
+                        'グループ' . $group_number,
+                        $post->ID,
+                        $post->post_title,
+                        $status_label,
+                        $post->post_date,
+                        $post->post_modified,
+                        $prefecture_names,
+                        $municipality_names,
+                        $category_names,
+                        $dup->count,
+                        $action_suggestion
+                    );
+                }
+                
+                // グループ区切り用の空行
+                $export_data[] = array('', '', '', '', '', '', '', '', '', '', '');
+                $group_number++;
+            }
+            
+            gi_log_error('Prepared export data', array('rows' => count($export_data)));
+            
+            // GoogleSheetsSyncインスタンスを取得
+            $sheets_sync = GoogleSheetsSync::getInstance();
+            
+            // 「重複タイトル」シートを作成または取得
+            $sheet_name = '重複タイトル';
+            
+            // シートが存在するか確認（存在しない場合は作成）
+            gi_log_error('Creating or accessing sheet', array('sheet_name' => $sheet_name));
+            
+            try {
+                // まず、既存シートのデータをクリア（存在する場合）
+                $clear_range = $sheet_name . '!A:K';
+                $sheets_sync->clear_sheet_range($clear_range);
+                gi_log_error('Cleared existing sheet data');
+            } catch (Exception $e) {
+                // シートが存在しない場合は作成
+                gi_log_error('Sheet does not exist, creating new sheet', array('error' => $e->getMessage()));
+                
+                $new_sheet = $sheets_sync->create_new_sheet(
+                    $sheets_sync->get_spreadsheet_id(),
+                    $sheet_name
+                );
+                
+                if (!$new_sheet) {
+                    throw new Exception('重複タイトルシートの作成に失敗しました');
+                }
+                
+                gi_log_error('Created new sheet', array('sheet' => $new_sheet));
+            }
+            
+            // データを書き込み
+            $write_range = $sheet_name . '!A1:K' . count($export_data);
+            $result = $sheets_sync->write_sheet_data($write_range, $export_data, 'USER_ENTERED');
+            
+            if ($result) {
+                $spreadsheet_url = 'https://docs.google.com/spreadsheets/d/' . $sheets_sync->get_spreadsheet_id() . '/edit';
+                
+                wp_send_json_success(array(
+                    'message' => '✅ 重複タイトル ' . count($duplicate_titles) . ' グループをエクスポートしました',
+                    'count' => count($duplicate_titles),
+                    'total_posts' => count($export_data) - 1, // ヘッダー行を除く
+                    'spreadsheet_url' => $spreadsheet_url,
+                    'sheet_name' => $sheet_name
+                ));
+            } else {
+                throw new Exception('スプレッドシートへの書き込みに失敗しました');
+            }
+            
+        } catch (Exception $e) {
+            gi_log_error('Export duplicate titles failed', array(
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ));
+            wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
+        }
+    }
 }
 
 /**
@@ -4802,271 +5067,6 @@ class SheetsInitializer {
         } catch (Exception $e) {
             gi_log_error('ID range export failed', array(
                 'error' => $e->getMessage()
-            ));
-            wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * 重複タイトルチェック
-     */
-    public function ajax_check_duplicate_titles() {
-        try {
-            gi_log_error('AJAX check duplicate titles request received');
-            
-            // Nonce検証
-            check_ajax_referer('gi_admin_nonce', 'nonce');
-            
-            // 権限チェック
-            if (!current_user_can('edit_posts')) {
-                wp_send_json_error('権限がありません');
-                return;
-            }
-            
-            global $wpdb;
-            
-            // 重複タイトルを検索（SQL直接実行で高速化）
-            $duplicate_titles = $wpdb->get_results("
-                SELECT post_title, COUNT(*) as count
-                FROM {$wpdb->posts}
-                WHERE post_type = 'grant'
-                AND post_status IN ('publish', 'draft', 'private', 'pending')
-                GROUP BY post_title
-                HAVING count > 1
-                ORDER BY count DESC, post_title ASC
-            ");
-            
-            if (empty($duplicate_titles)) {
-                wp_send_json_success(array(
-                    'message' => '✅ 重複タイトルは見つかりませんでした。',
-                    'duplicates' => array()
-                ));
-                return;
-            }
-            
-            // 重複の詳細情報を取得
-            $duplicate_details = array();
-            foreach ($duplicate_titles as $dup) {
-                $posts = get_posts(array(
-                    'post_type' => 'grant',
-                    'post_status' => array('publish', 'draft', 'private', 'pending'),
-                    'title' => $dup->post_title,
-                    'posts_per_page' => -1,
-                    'orderby' => 'ID',
-                    'order' => 'ASC'
-                ));
-                
-                $post_details = array();
-                foreach ($posts as $post) {
-                    $post_details[] = array(
-                        'id' => $post->ID,
-                        'status' => $post->post_status,
-                        'date' => $post->post_date,
-                        'modified' => $post->post_modified
-                    );
-                }
-                
-                $duplicate_details[] = array(
-                    'title' => $dup->post_title,
-                    'count' => $dup->count,
-                    'posts' => $post_details
-                );
-            }
-            
-            gi_log_error('Duplicate titles found', array('count' => count($duplicate_titles)));
-            
-            wp_send_json_success(array(
-                'message' => '⚠️ ' . count($duplicate_titles) . ' 件の重複タイトルが見つかりました。',
-                'duplicates' => $duplicate_details
-            ));
-            
-        } catch (Exception $e) {
-            gi_log_error('Duplicate check failed', array(
-                'error' => $e->getMessage()
-            ));
-            wp_send_json_error('チェックに失敗しました: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * 重複タイトルをスプレッドシートにエクスポート
-     */
-    public function ajax_export_duplicate_titles() {
-        try {
-            gi_log_error('AJAX export duplicate titles request received');
-            
-            // Nonce検証
-            check_ajax_referer('gi_admin_nonce', 'nonce');
-            
-            // 権限チェック
-            if (!current_user_can('edit_posts')) {
-                wp_send_json_error('権限がありません');
-                return;
-            }
-            
-            // メモリ制限を拡張
-            @ini_set('memory_limit', '512M');
-            @set_time_limit(300);
-            
-            global $wpdb;
-            
-            // 重複タイトルを検索
-            $duplicate_titles = $wpdb->get_results("
-                SELECT post_title, COUNT(*) as count
-                FROM {$wpdb->posts}
-                WHERE post_type = 'grant'
-                AND post_status IN ('publish', 'draft', 'private', 'pending')
-                GROUP BY post_title
-                HAVING count > 1
-                ORDER BY count DESC, post_title ASC
-            ");
-            
-            if (empty($duplicate_titles)) {
-                wp_send_json_success(array(
-                    'message' => '✅ 重複タイトルは見つかりませんでした。',
-                    'count' => 0
-                ));
-                return;
-            }
-            
-            gi_log_error('Found duplicate titles', array('count' => count($duplicate_titles)));
-            
-            // スプレッドシートに書き込むデータを準備
-            $export_data = array();
-            
-            // ヘッダー行
-            $export_data[] = array(
-                '重複グループ',
-                '投稿ID',
-                'タイトル',
-                'ステータス',
-                '作成日',
-                '更新日',
-                '都道府県',
-                '市町村',
-                'カテゴリ',
-                '重複数',
-                '対処方法'
-            );
-            
-            // 重複の詳細データを取得
-            $group_number = 1;
-            foreach ($duplicate_titles as $dup) {
-                $posts = get_posts(array(
-                    'post_type' => 'grant',
-                    'post_status' => array('publish', 'draft', 'private', 'pending'),
-                    'title' => $dup->post_title,
-                    'posts_per_page' => -1,
-                    'orderby' => 'ID',
-                    'order' => 'ASC'
-                ));
-                
-                $is_first_in_group = true;
-                foreach ($posts as $post) {
-                    // 都道府県を取得
-                    $prefectures = wp_get_post_terms($post->ID, 'grant_prefecture', array('fields' => 'names'));
-                    $prefecture_names = is_array($prefectures) && !is_wp_error($prefectures) ? implode(', ', $prefectures) : '';
-                    
-                    // 市町村を取得
-                    $municipalities = wp_get_post_terms($post->ID, 'grant_municipality', array('fields' => 'names'));
-                    $municipality_names = is_array($municipalities) && !is_wp_error($municipalities) ? implode(', ', $municipalities) : '';
-                    
-                    // カテゴリを取得
-                    $categories = wp_get_post_terms($post->ID, 'grant_category', array('fields' => 'names'));
-                    $category_names = is_array($categories) && !is_wp_error($categories) ? implode(', ', $categories) : '';
-                    
-                    // ステータスを日本語化
-                    $status_labels = array(
-                        'publish' => '公開',
-                        'draft' => '下書き',
-                        'private' => '非公開',
-                        'pending' => '承認待ち'
-                    );
-                    $status_label = isset($status_labels[$post->post_status]) ? $status_labels[$post->post_status] : $post->post_status;
-                    
-                    // 対処方法の提案
-                    $action_suggestion = '';
-                    if ($is_first_in_group) {
-                        $action_suggestion = '✅ 保持推奨（最古/最新を選択）';
-                        $is_first_in_group = false;
-                    } else {
-                        $action_suggestion = '❌ 削除候補（E列をdeletedに変更）';
-                    }
-                    
-                    $export_data[] = array(
-                        'グループ' . $group_number,
-                        $post->ID,
-                        $post->post_title,
-                        $status_label,
-                        $post->post_date,
-                        $post->post_modified,
-                        $prefecture_names,
-                        $municipality_names,
-                        $category_names,
-                        $dup->count,
-                        $action_suggestion
-                    );
-                }
-                
-                // グループ区切り用の空行
-                $export_data[] = array('', '', '', '', '', '', '', '', '', '', '');
-                $group_number++;
-            }
-            
-            gi_log_error('Prepared export data', array('rows' => count($export_data)));
-            
-            // GoogleSheetsSyncインスタンスを取得
-            $sheets_sync = GoogleSheetsSync::getInstance();
-            
-            // 「重複タイトル」シートを作成または取得
-            $sheet_name = '重複タイトル';
-            
-            // シートが存在するか確認（存在しない場合は作成）
-            gi_log_error('Creating or accessing sheet', array('sheet_name' => $sheet_name));
-            
-            try {
-                // まず、既存シートのデータをクリア（存在する場合）
-                $clear_range = $sheet_name . '!A:K';
-                $sheets_sync->clear_sheet_range($clear_range);
-                gi_log_error('Cleared existing sheet data');
-            } catch (Exception $e) {
-                // シートが存在しない場合は作成
-                gi_log_error('Sheet does not exist, creating new sheet', array('error' => $e->getMessage()));
-                
-                $new_sheet = $sheets_sync->create_new_sheet(
-                    $sheets_sync->get_spreadsheet_id(),
-                    $sheet_name
-                );
-                
-                if (!$new_sheet) {
-                    throw new Exception('重複タイトルシートの作成に失敗しました');
-                }
-                
-                gi_log_error('Created new sheet', array('sheet' => $new_sheet));
-            }
-            
-            // データを書き込み
-            $write_range = $sheet_name . '!A1:K' . count($export_data);
-            $result = $sheets_sync->write_sheet_data($write_range, $export_data, 'USER_ENTERED');
-            
-            if ($result) {
-                $spreadsheet_url = 'https://docs.google.com/spreadsheets/d/' . $sheets_sync->get_spreadsheet_id() . '/edit';
-                
-                wp_send_json_success(array(
-                    'message' => '✅ 重複タイトル ' . count($duplicate_titles) . ' グループをエクスポートしました',
-                    'count' => count($duplicate_titles),
-                    'total_posts' => count($export_data) - 1, // ヘッダー行を除く
-                    'spreadsheet_url' => $spreadsheet_url,
-                    'sheet_name' => $sheet_name
-                ));
-            } else {
-                throw new Exception('スプレッドシートへの書き込みに失敗しました');
-            }
-            
-        } catch (Exception $e) {
-            gi_log_error('Export duplicate titles failed', array(
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ));
             wp_send_json_error('エクスポートに失敗しました: ' . $e->getMessage());
         }
