@@ -3639,6 +3639,13 @@ class GoogleSheetsSync {
             
             // データを書き込み
             $write_range = $sheet_name . '!A1:K' . count($export_data);
+            
+            gi_log_error('Attempting to write duplicate titles', array(
+                'range' => $write_range,
+                'rows' => count($export_data),
+                'spreadsheet_id' => $this->get_spreadsheet_id()
+            ));
+            
             $result = $this->write_sheet_data($write_range, $export_data, 'USER_ENTERED');
             
             if ($result) {
@@ -3652,7 +3659,11 @@ class GoogleSheetsSync {
                     'sheet_name' => $sheet_name
                 ));
             } else {
-                throw new Exception('スプレッドシートへの書き込みに失敗しました');
+                gi_log_error('Write failed - result is false', array(
+                    'range' => $write_range,
+                    'data_count' => count($export_data)
+                ));
+                throw new Exception('スプレッドシートへの書き込みに失敗しました。詳細はエラーログを確認してください。');
             }
             
         } catch (Exception $e) {
