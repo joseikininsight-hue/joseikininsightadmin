@@ -1656,7 +1656,10 @@ class GoogleSheetsSync {
             return false;
         }
         
-        $url = self::SHEETS_API_URL . $this->spreadsheet_id . '/values/' . urlencode($this->sheet_name . '!' . $range) . ':clear';
+        // $rangeがシート名を含んでいるかチェック（例: "重複タイトル!A:K"）
+        $full_range = strpos($range, '!') !== false ? $range : ($this->sheet_name . '!' . $range);
+        
+        $url = self::SHEETS_API_URL . $this->spreadsheet_id . '/values/' . urlencode($full_range) . ':clear';
         
         $response = wp_remote_post($url, array(
             'headers' => array(
@@ -1670,7 +1673,9 @@ class GoogleSheetsSync {
         if (is_wp_error($response)) {
             gi_log_error('Clear Sheet Range Request Failed', array(
                 'error' => $response->get_error_message(),
-                'range' => $range
+                'range' => $range,
+                'full_range' => $full_range,
+                'url' => $url
             ));
             return false;
         }
@@ -1680,12 +1685,14 @@ class GoogleSheetsSync {
             gi_log_error('Clear Sheet Range Failed', array(
                 'response_code' => $response_code,
                 'response_body' => wp_remote_retrieve_body($response),
-                'range' => $range
+                'range' => $range,
+                'full_range' => $full_range,
+                'url' => $url
             ));
             return false;
         }
         
-        gi_log_error('Sheet range cleared successfully', array('range' => $range));
+        gi_log_error('Sheet range cleared successfully', array('range' => $range, 'full_range' => $full_range));
         return true;
     }
     
