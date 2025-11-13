@@ -506,140 +506,42 @@ if (!defined('ABSPATH')) {
 .required {
     color: #d63638;
 }
+
+.ji-notice {
+    margin: 20px 0;
+    padding: 12px;
+    border-left: 4px solid;
+}
+
+.ji-notice.notice-success {
+    background: #edfaed;
+    border-color: #00a32a;
+}
+
+.ji-notice.notice-error {
+    background: #fef7f1;
+    border-color: #d63638;
+}
+
+.ji-notice.notice-info {
+    background: #f0f6fc;
+    border-color: #2271b1;
+}
+
+.ji-notice-loading {
+    background: #f0f6fc;
+    border-color: #2271b1;
+}
+
+.ji-notice-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
 </style>
 
-<script>
-jQuery(document).ready(function($) {
-    // 新規追加
-    $('.ji-add-new-ad').on('click', function(e) {
-        e.preventDefault();
-        $('#ji-modal-title').text('広告を追加');
-        $('#ji-ad-form')[0].reset();
-        $('#ad_id').val('');
-        $('#ji-ad-modal').show();
-    });
-    
-    // 編集
-    $('.ji-edit-ad').on('click', function(e) {
-        e.preventDefault();
-        var adId = $(this).data('ad-id');
-        
-        $('#ji-modal-title').text('広告を編集');
-        
-        // AJAXで広告データを取得
-        $.post(ajaxurl, {
-            action: 'ji_get_ad',
-            nonce: jiAdminAds.nonce,
-            ad_id: adId
-        }, function(response) {
-            if (response.success) {
-                var ad = response.data;
-                
-                // フォームに既存データを入力
-                $('#ad_id').val(ad.id);
-                $('#title').val(ad.title);
-                $('#ad_type').val(ad.ad_type);
-                $('#content').val(ad.content);
-                $('#link_url').val(ad.link_url);
-                
-                // 配置位置（複数選択）
-                $('#positions').val(ad.positions_array);
-                
-                // 対象ページ（複数選択）
-                if (ad.target_pages_array && ad.target_pages_array.length > 0) {
-                    $('#target_pages').val(ad.target_pages_array);
-                } else {
-                    $('#target_pages').val(['']); // すべてのページ
-                }
-                
-                // 対象カテゴリー（複数選択）
-                if (ad.target_categories_array && ad.target_categories_array.length > 0) {
-                    $('#target_categories').val(ad.target_categories_array);
-                } else {
-                    $('#target_categories').val(['']); // すべてのカテゴリー
-                }
-                
-                $('#device_target').val(ad.device_target || 'all');
-                $('#status').val(ad.status);
-                $('#priority').val(ad.priority);
-                
-                // 日時フィールド（datetime-local format: YYYY-MM-DDTHH:MM）
-                if (ad.start_date) {
-                    var startDate = new Date(ad.start_date);
-                    $('#start_date').val(formatDateTimeLocal(startDate));
-                }
-                if (ad.end_date) {
-                    var endDate = new Date(ad.end_date);
-                    $('#end_date').val(formatDateTimeLocal(endDate));
-                }
-                
-                $('#ji-ad-modal').show();
-            } else {
-                alert('エラー: ' + response.data);
-            }
-        });
-    });
-    
-    // 日時をdatetime-local形式に変換
-    function formatDateTimeLocal(date) {
-        var year = date.getFullYear();
-        var month = ('0' + (date.getMonth() + 1)).slice(-2);
-        var day = ('0' + date.getDate()).slice(-2);
-        var hours = ('0' + date.getHours()).slice(-2);
-        var minutes = ('0' + date.getMinutes()).slice(-2);
-        return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes;
-    }
-    
-    // 削除
-    $('.ji-delete-ad').on('click', function(e) {
-        e.preventDefault();
-        
-        if (!confirm('この広告を削除してもよろしいですか？統計データも削除されます。')) {
-            return;
-        }
-        
-        var adId = $(this).data('ad-id');
-        
-        $.post(ajaxurl, {
-            action: 'ji_delete_ad',
-            nonce: jiAdminAds.nonce,
-            ad_id: adId
-        }, function(response) {
-            if (response.success) {
-                alert(response.data);
-                location.reload();
-            } else {
-                alert('エラー: ' + response.data);
-            }
-        });
-    });
-    
-    // モーダルを閉じる
-    $('.ji-modal-close').on('click', function() {
-        $('#ji-ad-modal').hide();
-    });
-    
-    $(window).on('click', function(e) {
-        if ($(e.target).is('#ji-ad-modal')) {
-            $('#ji-ad-modal').hide();
-        }
-    });
-    
-    // フォーム送信
-    $('#ji-ad-form').on('submit', function(e) {
-        e.preventDefault();
-        
-        var formData = $(this).serialize();
-        formData += '&action=ji_save_ad&nonce=' + jiAdminAds.nonce;
-        
-        $.post(ajaxurl, formData, function(response) {
-            if (response.success) {
-                alert(response.data.message);
-                location.reload();
-            } else {
-                alert('エラー: ' + response.data);
-            }
-        });
-    });
-});
-</script>
+<!-- JavaScript loaded via affiliate-ads.js (enqueued in affiliate-ad-manager.php) -->

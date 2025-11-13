@@ -222,8 +222,17 @@ class JI_Affiliate_Ad_Manager {
         }
         
         // CSS読み込みは theme-foundation.php で統合管理（admin.css）
-        // JS読み込みは theme-foundation.php で統合管理（admin.js）
         
+        // Affiliate Ads専用JavaScript読み込み
+        wp_enqueue_script(
+            'ji-admin-ads',
+            get_template_directory_uri() . '/assets/js/affiliate-ads.js',
+            array('jquery'),
+            GI_THEME_VERSION,
+            true
+        );
+        
+        // JavaScript設定の出力
         wp_localize_script('ji-admin-ads', 'jiAdminAds', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('ji_ad_nonce'),
