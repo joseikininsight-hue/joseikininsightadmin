@@ -1,16 +1,16 @@
 <?php
 /**
- * Template Part: Grant & Column Tabs Section - Optimized
- * 補助金・コラム統合タブセクション - 最適化版
+ * Template Part: Grant & Column Tabs Section - Optimized with Card Component
+ * 補助金・コラム統合タブセクション - カードコンポーネント統合版
  * 
  * @package Grant_Insight_Perfect
- * @version 23.0.0 - Optimized Edition
+ * @version 24.0.0 - Card Component Integration
  * 
  * Features:
  * - Clear information hierarchy
  * - Improved mobile UX
  * - Enhanced SEO with proper schema
- * - Consistent design with other sections
+ * - Consistent design with card components
  * - Accessibility optimized
  */
 
@@ -118,7 +118,7 @@ $schema_data = [
 </script>
 
 <!-- ============================================
-     Grant & Column Tabs Section - Optimized
+     Grant & Column Tabs Section - Card Integration
      ============================================ -->
 
 <section class="gi-tabs-section" 
@@ -238,69 +238,9 @@ $schema_data = [
                         <!-- 注目の補助金 -->
                         <div class="gi-subtab-content active" data-content="grant-featured">
                             <?php if ($featured_grants->have_posts()) : ?>
-                                <div class="gi-news-list">
-                                    <?php while ($featured_grants->have_posts()) : $featured_grants->the_post(); 
-                                        $deadline = get_post_meta(get_the_ID(), 'deadline_date', true);
-                                        $amount = get_post_meta(get_the_ID(), 'grant_amount_max', true);
-                                        $categories = get_the_terms(get_the_ID(), 'grant_category');
-                                        $prefecture = get_the_terms(get_the_ID(), 'grant_prefecture');
-                                        
-                                        $days_left = null;
-                                        if ($deadline) {
-                                            $deadline_date = new DateTime($deadline);
-                                            $now = new DateTime();
-                                            $diff = $now->diff($deadline_date);
-                                            $days_left = $diff->days;
-                                        }
-                                    ?>
-                                        <article class="gi-news-item" itemscope itemtype="https://schema.org/Article">
-                                            <a href="<?php the_permalink(); ?>" class="gi-news-link" itemprop="url">
-                                                <div class="gi-news-header">
-                                                    <div class="gi-news-badges">
-                                                        <span class="gi-badge gi-badge-featured" aria-label="注目の補助金">注目</span>
-                                                        <?php if ($days_left !== null && $days_left <= 14) : ?>
-                                                            <span class="gi-badge gi-badge-urgent" aria-label="締切まで<?php echo $days_left; ?>日">あと<?php echo $days_left; ?>日</span>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                    <time class="gi-news-date" datetime="<?php echo get_the_date('c'); ?>" itemprop="datePublished">
-                                                        <?php echo get_the_date('Y/m/d'); ?>
-                                                    </time>
-                                                </div>
-                                                
-                                                <h3 class="gi-news-title" itemprop="headline"><?php the_title(); ?></h3>
-                                                
-                                                <div class="gi-news-meta">
-                                                    <?php if ($categories && !is_wp_error($categories)) : ?>
-                                                        <span class="gi-meta-tag gi-meta-category">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                                            </svg>
-                                                            <?php echo esc_html($categories[0]->name); ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if ($prefecture && !is_wp_error($prefecture)) : ?>
-                                                        <span class="gi-meta-tag gi-meta-location">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                                                                <circle cx="12" cy="10" r="3"/>
-                                                            </svg>
-                                                            <?php echo esc_html($prefecture[0]->name); ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if ($amount) : ?>
-                                                        <span class="gi-meta-tag gi-meta-amount">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <line x1="12" y1="1" x2="12" y2="23"/>
-                                                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                                                            </svg>
-                                                            最大<?php echo number_format($amount); ?>万円
-                                                        </span>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </a>
-                                        </article>
+                                <div class="gi-card-list">
+                                    <?php while ($featured_grants->have_posts()) : $featured_grants->the_post(); ?>
+                                        <?php get_template_part('template-parts/grant/card'); ?>
                                     <?php endwhile; wp_reset_postdata(); ?>
                                 </div>
                             <?php else : ?>
@@ -328,66 +268,9 @@ $schema_data = [
                         <!-- 締切間近の補助金 -->
                         <div class="gi-subtab-content" data-content="grant-deadline">
                             <?php if ($deadline_soon_grants->have_posts()) : ?>
-                                <div class="gi-news-list">
-                                    <?php while ($deadline_soon_grants->have_posts()) : $deadline_soon_grants->the_post(); 
-                                        $deadline = get_post_meta(get_the_ID(), 'deadline_date', true);
-                                        $amount = get_post_meta(get_the_ID(), 'grant_amount_max', true);
-                                        $categories = get_the_terms(get_the_ID(), 'grant_category');
-                                        $prefecture = get_the_terms(get_the_ID(), 'grant_prefecture');
-                                        
-                                        $days_left = null;
-                                        if ($deadline) {
-                                            $deadline_date = new DateTime($deadline);
-                                            $now = new DateTime();
-                                            $diff = $now->diff($deadline_date);
-                                            $days_left = $diff->days;
-                                        }
-                                    ?>
-                                        <article class="gi-news-item" itemscope itemtype="https://schema.org/Article">
-                                            <a href="<?php the_permalink(); ?>" class="gi-news-link" itemprop="url">
-                                                <div class="gi-news-header">
-                                                    <div class="gi-news-badges">
-                                                        <span class="gi-badge gi-badge-urgent" aria-label="締切まで<?php echo $days_left; ?>日">あと<?php echo $days_left; ?>日</span>
-                                                    </div>
-                                                    <time class="gi-news-date" datetime="<?php echo get_the_date('c'); ?>" itemprop="datePublished">
-                                                        <?php echo get_the_date('Y/m/d'); ?>
-                                                    </time>
-                                                </div>
-                                                
-                                                <h3 class="gi-news-title" itemprop="headline"><?php the_title(); ?></h3>
-                                                
-                                                <div class="gi-news-meta">
-                                                    <?php if ($categories && !is_wp_error($categories)) : ?>
-                                                        <span class="gi-meta-tag gi-meta-category">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                                            </svg>
-                                                            <?php echo esc_html($categories[0]->name); ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if ($prefecture && !is_wp_error($prefecture)) : ?>
-                                                        <span class="gi-meta-tag gi-meta-location">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                                                                <circle cx="12" cy="10" r="3"/>
-                                                            </svg>
-                                                            <?php echo esc_html($prefecture[0]->name); ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if ($amount) : ?>
-                                                        <span class="gi-meta-tag gi-meta-amount">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <line x1="12" y1="1" x2="12" y2="23"/>
-                                                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                                                            </svg>
-                                                            最大<?php echo number_format($amount); ?>万円
-                                                        </span>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </a>
-                                        </article>
+                                <div class="gi-card-list">
+                                    <?php while ($deadline_soon_grants->have_posts()) : $deadline_soon_grants->the_post(); ?>
+                                        <?php get_template_part('template-parts/grant/card'); ?>
                                     <?php endwhile; wp_reset_postdata(); ?>
                                 </div>
                             <?php else : ?>
@@ -415,58 +298,9 @@ $schema_data = [
                         <!-- 新着の補助金 -->
                         <div class="gi-subtab-content" data-content="grant-new">
                             <?php if ($new_grants->have_posts()) : ?>
-                                <div class="gi-news-list">
-                                    <?php while ($new_grants->have_posts()) : $new_grants->the_post(); 
-                                        $deadline = get_post_meta(get_the_ID(), 'deadline_date', true);
-                                        $amount = get_post_meta(get_the_ID(), 'grant_amount_max', true);
-                                        $categories = get_the_terms(get_the_ID(), 'grant_category');
-                                        $prefecture = get_the_terms(get_the_ID(), 'grant_prefecture');
-                                    ?>
-                                        <article class="gi-news-item" itemscope itemtype="https://schema.org/Article">
-                                            <a href="<?php the_permalink(); ?>" class="gi-news-link" itemprop="url">
-                                                <div class="gi-news-header">
-                                                    <div class="gi-news-badges">
-                                                        <span class="gi-badge gi-badge-new" aria-label="新着">NEW</span>
-                                                    </div>
-                                                    <time class="gi-news-date" datetime="<?php echo get_the_date('c'); ?>" itemprop="datePublished">
-                                                        <?php echo get_the_date('Y/m/d'); ?>
-                                                    </time>
-                                                </div>
-                                                
-                                                <h3 class="gi-news-title" itemprop="headline"><?php the_title(); ?></h3>
-                                                
-                                                <div class="gi-news-meta">
-                                                    <?php if ($categories && !is_wp_error($categories)) : ?>
-                                                        <span class="gi-meta-tag gi-meta-category">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                                            </svg>
-                                                            <?php echo esc_html($categories[0]->name); ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if ($prefecture && !is_wp_error($prefecture)) : ?>
-                                                        <span class="gi-meta-tag gi-meta-location">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                                                                <circle cx="12" cy="10" r="3"/>
-                                                            </svg>
-                                                            <?php echo esc_html($prefecture[0]->name); ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                    
-                                                    <?php if ($amount) : ?>
-                                                        <span class="gi-meta-tag gi-meta-amount">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <line x1="12" y1="1" x2="12" y2="23"/>
-                                                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                                                            </svg>
-                                                            最大<?php echo number_format($amount); ?>万円
-                                                        </span>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </a>
-                                        </article>
+                                <div class="gi-card-list">
+                                    <?php while ($new_grants->have_posts()) : $new_grants->the_post(); ?>
+                                        <?php get_template_part('template-parts/grant/card'); ?>
                                     <?php endwhile; wp_reset_postdata(); ?>
                                 </div>
                             <?php else : ?>
@@ -519,37 +353,9 @@ $schema_data = [
                         <!-- 新着コラム -->
                         <div class="gi-subtab-content active" data-content="column-new">
                             <?php if ($new_columns->have_posts()) : ?>
-                                <div class="gi-news-list">
-                                    <?php while ($new_columns->have_posts()) : $new_columns->the_post(); 
-                                        $categories = get_the_terms(get_the_ID(), 'column_category');
-                                        $view_count = get_post_meta(get_the_ID(), 'view_count', true);
-                                    ?>
-                                        <article class="gi-news-item" itemscope itemtype="https://schema.org/Article">
-                                            <a href="<?php the_permalink(); ?>" class="gi-news-link" itemprop="url">
-                                                <div class="gi-news-header">
-                                                    <?php if ($categories && !is_wp_error($categories)) : ?>
-                                                        <span class="gi-news-category"><?php echo esc_html($categories[0]->name); ?></span>
-                                                    <?php endif; ?>
-                                                    <time class="gi-news-date" datetime="<?php echo get_the_date('c'); ?>" itemprop="datePublished">
-                                                        <?php echo get_the_date('Y/m/d'); ?>
-                                                    </time>
-                                                </div>
-                                                
-                                                <h3 class="gi-news-title" itemprop="headline"><?php the_title(); ?></h3>
-                                                
-                                                <?php if ($view_count) : ?>
-                                                    <div class="gi-news-meta">
-                                                        <span class="gi-meta-views">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                                                <circle cx="12" cy="12" r="3"/>
-                                                            </svg>
-                                                            <?php echo number_format($view_count); ?>
-                                                        </span>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </a>
-                                        </article>
+                                <div class="gi-card-list gi-column-cards">
+                                    <?php while ($new_columns->have_posts()) : $new_columns->the_post(); ?>
+                                        <?php get_template_part('template-parts/column/card'); ?>
                                     <?php endwhile; wp_reset_postdata(); ?>
                                 </div>
                             <?php else : ?>
@@ -577,37 +383,9 @@ $schema_data = [
                         <!-- 人気コラム -->
                         <div class="gi-subtab-content" data-content="column-popular">
                             <?php if ($popular_columns->have_posts()) : ?>
-                                <div class="gi-news-list">
-                                    <?php while ($popular_columns->have_posts()) : $popular_columns->the_post(); 
-                                        $categories = get_the_terms(get_the_ID(), 'column_category');
-                                        $view_count = get_post_meta(get_the_ID(), 'view_count', true);
-                                    ?>
-                                        <article class="gi-news-item" itemscope itemtype="https://schema.org/Article">
-                                            <a href="<?php the_permalink(); ?>" class="gi-news-link" itemprop="url">
-                                                <div class="gi-news-header">
-                                                    <?php if ($categories && !is_wp_error($categories)) : ?>
-                                                        <span class="gi-news-category"><?php echo esc_html($categories[0]->name); ?></span>
-                                                    <?php endif; ?>
-                                                    <time class="gi-news-date" datetime="<?php echo get_the_date('c'); ?>" itemprop="datePublished">
-                                                        <?php echo get_the_date('Y/m/d'); ?>
-                                                    </time>
-                                                </div>
-                                                
-                                                <h3 class="gi-news-title" itemprop="headline"><?php the_title(); ?></h3>
-                                                
-                                                <?php if ($view_count) : ?>
-                                                    <div class="gi-news-meta">
-                                                        <span class="gi-meta-views">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                                                <circle cx="12" cy="12" r="3"/>
-                                                            </svg>
-                                                            <?php echo number_format($view_count); ?>
-                                                        </span>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </a>
-                                        </article>
+                                <div class="gi-card-list gi-column-cards">
+                                    <?php while ($popular_columns->have_posts()) : $popular_columns->the_post(); ?>
+                                        <?php get_template_part('template-parts/column/card'); ?>
                                     <?php endwhile; wp_reset_postdata(); ?>
                                 </div>
                             <?php else : ?>
@@ -760,12 +538,12 @@ $schema_data = [
 
 <style>
 /* ===================================
-   Grant & Column Tabs Section - Optimized
-   他セクションと統一されたデザイン
+   Grant & Column Tabs Section - Card Integration
+   カードコンポーネント統合版
    =================================== */
 
 :root {
-    /* 他セクションと統一されたカラーパレット */
+    /* 統一カラーパレット */
     --gi-primary: #000000;
     --gi-secondary: #ffffff;
     --gi-accent: #ffeb3b;
@@ -988,7 +766,21 @@ $schema_data = [
     display: block;
 }
 
-/* ===== News List ===== */
+/* ===== Card List ===== */
+.gi-card-list {
+    padding: 0;
+}
+
+/* コラムカード用の調整 */
+.gi-column-cards .column-card-compact {
+    border-bottom: 1px solid var(--gi-gray-200);
+}
+
+.gi-column-cards .column-card-compact:last-child {
+    border-bottom: none;
+}
+
+/* ===== News List（お知らせ用） ===== */
 .gi-news-list {
     padding: 0;
 }
@@ -1021,41 +813,6 @@ $schema_data = [
     margin-bottom: 10px;
 }
 
-.gi-news-badges {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.gi-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--gi-secondary);
-    text-transform: uppercase;
-}
-
-.gi-badge-featured {
-    background: var(--gi-orange);
-}
-
-.gi-badge-urgent {
-    background: var(--gi-red);
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.8; }
-}
-
-.gi-badge-new {
-    background: var(--gi-green);
-}
-
 .gi-news-category {
     display: inline-block;
     padding: 4px 10px;
@@ -1076,43 +833,13 @@ $schema_data = [
     font-size: 16px;
     font-weight: 700;
     color: var(--gi-primary);
-    margin: 0 0 10px 0;
+    margin: 0;
     line-height: 1.5;
     transition: color var(--gi-transition);
 }
 
 .gi-news-link:hover .gi-news-title {
     color: var(--gi-blue);
-}
-
-.gi-news-meta {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-
-.gi-meta-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--gi-gray-600);
-    font-weight: 600;
-}
-
-.gi-meta-amount {
-    color: var(--gi-blue);
-    font-weight: 700;
-}
-
-.gi-meta-views {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--gi-gray-500);
-    font-weight: 600;
 }
 
 /* ===== Panel Footer ===== */
@@ -1406,7 +1133,8 @@ $schema_data = [
         display: block !important;
     }
     
-    .gi-news-item {
+    .gi-news-item,
+    .column-card-compact {
         page-break-inside: avoid;
     }
 }
@@ -1554,6 +1282,6 @@ $schema_data = [
         observer.observe({ entryTypes: ['measure'] });
     }
     
-    console.log('✅ Grant & Column Tabs Section v23.0 (Optimized) Initialized');
+    console.log('✅ Grant & Column Tabs Section v24.0 (Card Integration) Initialized');
 })();
 </script>
