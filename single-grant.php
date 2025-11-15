@@ -3329,12 +3329,45 @@ select {
     overflow-wrap: break-word;
 }
 
+/* 詳細情報セクション全体の幅制御 */
+.gus-details-section * {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* モバイル時の全体的な幅制御 */
+@media (max-width: 768px) {
+    .gus-single {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .gus-main {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .gus-details-section {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .gus-details-banner,
+    .gus-details-content {
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+}
+
 /* ===============================================
    DETAILS SECTION - Prominent Banner Design
    =============================================== */
 
 .gus-details-section {
+    background: transparent !important;
+    border: none !important;
     border-left: none !important;
+    padding: 0 !important;
     margin-top: var(--gus-space-2xl);
     margin-bottom: var(--gus-space-2xl);
 }
@@ -3400,7 +3433,7 @@ select {
 }
 
 .gus-details-content {
-    background: #FAFAFA;
+    background: #FFFFFF;
     border: 2px solid #E5E5E5;
     border-top: none;
     border-radius: 0 0 12px 12px;
@@ -3470,6 +3503,7 @@ select {
 .gus-details-content li {
     margin-bottom: 8px;
     line-height: 1.8;
+    color: #333333;
 }
 
 .gus-details-content h1,
@@ -3483,12 +3517,23 @@ select {
     word-wrap: break-word;
 }
 
+.gus-details-content strong,
+.gus-details-content b {
+    color: #000000;
+}
+
+.gus-details-content a {
+    color: #000000;
+    text-decoration: underline;
+}
+
 /* Tablet Responsiveness */
 @media (max-width: 768px) {
     .gus-details-banner {
-        padding: 20px 20px;
+        padding: 18px 16px;
         gap: 12px;
         flex-wrap: wrap;
+        border-radius: 8px 8px 0 0;
     }
     
     .gus-details-banner-icon {
@@ -3502,22 +3547,30 @@ select {
     }
     
     .gus-details-banner-title {
-        font-size: 17px;
-        flex: 1;
-        min-width: 150px;
+        font-size: 16px;
+        flex: 1 1 100%;
+        min-width: 0;
+        word-wrap: break-word;
+        line-height: 1.5;
     }
     
     .gus-details-banner-subtitle {
-        font-size: 12px;
+        font-size: 11px;
         padding: 5px 12px;
-        width: 100%;
+        flex: 1 1 100%;
         text-align: center;
         margin-left: 0;
     }
     
     .gus-details-content {
-        padding: 24px 20px;
-        font-size: 15px;
+        padding: 20px 16px;
+        font-size: 14px;
+        border-radius: 0 0 8px 8px;
+    }
+    
+    .gus-details-content p {
+        font-size: 14px;
+        line-height: 1.8;
     }
     
     .gus-details-content table {
@@ -3529,53 +3582,90 @@ select {
         padding: 8px !important;
         font-size: 13px !important;
     }
+    
+    .gus-details-content h1 {
+        font-size: 18px;
+    }
+    
+    .gus-details-content h2 {
+        font-size: 17px;
+    }
+    
+    .gus-details-content h3 {
+        font-size: 16px;
+    }
+    
+    .gus-details-content h4 {
+        font-size: 15px;
+    }
 }
 
 /* Mobile Responsiveness */
 @media (max-width: 480px) {
     .gus-details-banner {
-        padding: 16px 16px;
-        gap: 10px;
+        padding: 14px 12px;
+        gap: 8px;
+        border-radius: 6px 6px 0 0;
     }
     
     .gus-details-banner-icon {
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
     }
     
     .gus-details-banner-icon svg {
-        width: 18px;
-        height: 18px;
+        width: 16px;
+        height: 16px;
     }
     
     .gus-details-banner-title {
-        font-size: 15px;
-        line-height: 1.5;
+        font-size: 14px;
+        line-height: 1.6;
+        flex: 1 1 100%;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
     
     .gus-details-banner-subtitle {
-        font-size: 11px;
-        padding: 4px 10px;
+        font-size: 10px;
+        padding: 4px 8px;
+        flex: 1 1 100%;
     }
     
     .gus-details-content {
-        padding: 20px 16px;
-        font-size: 14px;
+        padding: 16px 12px;
+        font-size: 13px;
+        border-radius: 0 0 6px 6px;
     }
     
     .gus-details-content p {
-        margin-bottom: 14px;
-        line-height: 1.85;
+        margin-bottom: 12px;
+        line-height: 1.9;
+        font-size: 13px;
     }
     
-    .gus-details-content table {
-        font-size: 12px;
+    .gus-details-content h1 {
+        font-size: 16px;
+        margin-top: 20px;
+        margin-bottom: 12px;
     }
     
-    .gus-details-content th,
-    .gus-details-content td {
-        padding: 6px !important;
-        font-size: 12px !important;
+    .gus-details-content h2 {
+        font-size: 15px;
+        margin-top: 18px;
+        margin-bottom: 10px;
+    }
+    
+    .gus-details-content h3 {
+        font-size: 14px;
+        margin-top: 16px;
+        margin-bottom: 8px;
+    }
+    
+    .gus-details-content h4 {
+        font-size: 13px;
+        margin-top: 14px;
+        margin-bottom: 8px;
     }
     
     .gus-details-content ul,
@@ -3583,33 +3673,86 @@ select {
         padding-left: 20px;
     }
     
-    .gus-details-content h1,
-    .gus-details-content h2,
-    .gus-details-content h3,
-    .gus-details-content h4 {
-        margin-top: 20px;
-        margin-bottom: 12px;
-        font-size: 16px;
+    .gus-details-content li {
+        font-size: 13px;
+        line-height: 1.9;
+    }
+    
+    .gus-details-content table {
+        font-size: 11px;
+        display: block;
+        overflow-x: auto;
+    }
+    
+    .gus-details-content th,
+    .gus-details-content td {
+        padding: 6px !important;
+        font-size: 11px !important;
+        white-space: normal;
+        word-wrap: break-word;
     }
 }
 
-/* Extra Small Mobile */
+/* Extra Small Mobile - 360px以下 */
 @media (max-width: 360px) {
     .gus-details-banner {
-        padding: 14px 14px;
+        padding: 12px 10px;
+    }
+    
+    .gus-details-banner-icon {
+        width: 28px;
+        height: 28px;
+    }
+    
+    .gus-details-banner-icon svg {
+        width: 14px;
+        height: 14px;
     }
     
     .gus-details-banner-title {
-        font-size: 14px;
+        font-size: 13px;
+        line-height: 1.7;
     }
     
     .gus-details-banner-subtitle {
-        font-size: 10px;
+        font-size: 9px;
+        padding: 3px 6px;
     }
     
     .gus-details-content {
-        padding: 18px 14px;
+        padding: 14px 10px;
+        font-size: 12px;
+    }
+    
+    .gus-details-content p {
+        font-size: 12px;
+        line-height: 2;
+    }
+    
+    .gus-details-content h1 {
+        font-size: 14px;
+    }
+    
+    .gus-details-content h2 {
         font-size: 13px;
+    }
+    
+    .gus-details-content h3 {
+        font-size: 12px;
+    }
+    
+    .gus-details-content h4 {
+        font-size: 12px;
+    }
+    
+    .gus-details-content table {
+        font-size: 10px;
+    }
+    
+    .gus-details-content th,
+    .gus-details-content td {
+        padding: 5px !important;
+        font-size: 10px !important;
     }
 }
 
