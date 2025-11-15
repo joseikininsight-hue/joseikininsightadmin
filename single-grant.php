@@ -3373,8 +3373,8 @@ select {
 }
 
 .gus-details-banner {
-    background: linear-gradient(135deg, #1a1a1a 0%, #000000 100%);
-    color: #FFFFFF;
+    background: linear-gradient(135deg, #1a1a1a 0%, #000000 100%) !important;
+    color: #FFFFFF !important;
     padding: 24px 28px;
     border-radius: 12px 12px 0 0;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -3383,6 +3383,10 @@ select {
     gap: 16px;
     position: relative;
     overflow: hidden;
+}
+
+.gus-details-banner * {
+    color: #FFFFFF !important;
 }
 
 .gus-details-banner::before {
@@ -3410,7 +3414,8 @@ select {
 .gus-details-banner-icon svg {
     width: 24px;
     height: 24px;
-    color: #FFD700;
+    color: #FFD700 !important;
+    stroke: #FFD700 !important;
 }
 
 .gus-details-banner-title {
@@ -3419,21 +3424,22 @@ select {
     font-weight: 800;
     letter-spacing: 0.5px;
     line-height: 1.4;
+    color: #FFFFFF !important;
 }
 
 .gus-details-banner-subtitle {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.9) !important;
     font-weight: 500;
     margin-left: auto;
     padding: 6px 14px;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.15);
     border-radius: 20px;
     white-space: nowrap;
 }
 
 .gus-details-content {
-    background: #FFFFFF;
+    background: #FFFFFF !important;
     border: 2px solid #E5E5E5;
     border-top: none;
     border-radius: 0 0 12px 12px;
@@ -3445,10 +3451,15 @@ select {
     overflow-wrap: break-word;
 }
 
+.gus-details-content,
+.gus-details-content *:not(.gus-details-banner):not(.gus-details-banner *) {
+    color: #333333 !important;
+}
+
 .gus-details-content p {
     margin-bottom: 16px;
     line-height: 1.8;
-    color: #333333;
+    color: #333333 !important;
     word-wrap: break-word;
     overflow-wrap: break-word;
 }
@@ -3470,6 +3481,12 @@ select {
     margin: 20px 0;
     border-radius: 8px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    background: #FFFFFF !important;
+}
+
+.gus-details-content table * {
+    color: #333333 !important;
+    background: transparent !important;
 }
 
 .gus-details-content iframe,
@@ -3503,7 +3520,7 @@ select {
 .gus-details-content li {
     margin-bottom: 8px;
     line-height: 1.8;
-    color: #333333;
+    color: #333333 !important;
 }
 
 .gus-details-content h1,
@@ -3513,18 +3530,25 @@ select {
     margin-top: 28px;
     margin-bottom: 16px;
     font-weight: 700;
-    color: #000000;
+    color: #000000 !important;
     word-wrap: break-word;
 }
 
 .gus-details-content strong,
 .gus-details-content b {
-    color: #000000;
+    color: #000000 !important;
 }
 
 .gus-details-content a {
-    color: #000000;
+    color: #0066CC !important;
     text-decoration: underline;
+}
+
+.gus-details-content span,
+.gus-details-content div,
+.gus-details-content td,
+.gus-details-content th {
+    color: #333333 !important;
 }
 
 /* Tablet Responsiveness */
