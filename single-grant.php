@@ -876,7 +876,7 @@ select {
 .gus-sidebar-card {
     background: #FFFFFF;
     border: 1px solid #E5E5E5;
-    border-radius: 8px;
+    border-radius: 0;
     padding: 16px;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -939,7 +939,7 @@ select {
 .gus-pc-ai-permanent {
     background: #FFFFFF;
     border: 2px solid #E5E5E5;
-    border-radius: 12px;
+    border-radius: 0;
     display: flex;
     flex-direction: column;
     height: 800px;
@@ -1005,7 +1005,7 @@ select {
 
 .gus-pc-ai-permanent-messages::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.2);
-    border-radius: 3px;
+    border-radius: 0;
 }
 
 .gus-pc-ai-permanent-messages::-webkit-scrollbar-thumb:hover {
@@ -1029,7 +1029,7 @@ select {
     flex: 1;
     padding: 12px 14px;
     border: 2px solid #E5E5E5;
-    border-radius: 10px;
+    border-radius: 0;
     font-size: 13px;
     font-family: inherit;
     min-height: 44px;
@@ -1057,7 +1057,7 @@ select {
     background: #000000;
     color: #FFFFFF;
     border: 2px solid #000000;
-    border-radius: 10px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1091,7 +1091,7 @@ select {
     background: #F8F8F8;
     color: #1A1A1A;
     border: 1px solid #E5E5E5;
-    border-radius: 16px;
+    border-radius: 0;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
@@ -1138,7 +1138,7 @@ select {
 .gus-ai-message-avatar {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1162,7 +1162,7 @@ select {
 .gus-ai-message-content {
     background: #F8F8F8;
     padding: 11px 14px;
-    border-radius: 10px;
+    border-radius: 0;
     border: 1px solid #E5E5E5;
     font-size: 12px;
     line-height: 1.6;
@@ -1188,7 +1188,7 @@ select {
 .gus-ai-typing-dots {
     background: #F8F8F8;
     padding: 11px 14px;
-    border-radius: 10px;
+    border-radius: 0;
     border: 1px solid #E5E5E5;
     display: flex;
     gap: 4px;
@@ -1199,7 +1199,7 @@ select {
     width: 6px;
     height: 6px;
     background: #666666;
-    border-radius: 50%;
+    border-radius: 0;
     animation: typing 1.4s infinite;
 }
 
@@ -1241,7 +1241,7 @@ select {
     font-size: 12px;
     font-weight: 500;
     border-left: 2px solid transparent;
-    border-radius: 4px;
+    border-radius: 0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1264,7 +1264,7 @@ select {
     background: var(--gus-gray-900);
     color: var(--gus-white);
     border: none;
-    border-radius: 50%;
+    border-radius: 0;
     width: 56px;
     height: 56px;
     cursor: pointer;
@@ -1336,8 +1336,8 @@ select {
     left: 0;
     right: 0;
     background: var(--gus-white);
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
     padding: var(--gus-space-xl) var(--gus-space-lg);
     max-height: 70vh;
     overflow-y: auto;
@@ -1397,7 +1397,7 @@ select {
 .gus-mobile-toc-list .gus-toc-link {
     font-size: 0.75rem;
     padding: 8px var(--gus-space-sm);
-    border-radius: 4px;
+    border-radius: 0;
     min-height: 36px;
     display: flex;
     align-items: center;
@@ -1470,7 +1470,7 @@ select {
 
 .gus-ai-chat-messages::-webkit-scrollbar-thumb {
     background: #E5E5E5;
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 .gus-ai-chat-messages::-webkit-scrollbar-thumb:hover {
@@ -1495,7 +1495,7 @@ select {
     flex: 1;
     padding: 12px 14px;
     border: 2px solid #E5E5E5 !important;
-    border-radius: 12px;
+    border-radius: 0;
     font-size: 16px !important;
     font-family: inherit;
     min-height: 44px;
@@ -1525,7 +1525,7 @@ select {
     background: #000000;
     color: #FFFFFF;
     border: 2px solid #000000;
-    border-radius: 12px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1565,7 +1565,7 @@ select {
     background: #F8F8F8;
     color: #1A1A1A;
     border: 1px solid #E5E5E5;
-    border-radius: 20px;
+    border-radius: 0;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -1593,7 +1593,7 @@ select {
     padding: 14px;
     background: #FFFFFF;
     border: 1px solid #E5E5E5;
-    border-radius: 6px;
+    border-radius: 0;
     text-decoration: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1636,7 +1636,7 @@ select {
     padding: 14px;
     background: #F9FAFB;
     border: 1px solid #E5E7EB;
-    border-radius: 8px;
+    border-radius: 0;
     text-decoration: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     gap: 12px;
@@ -1712,7 +1712,7 @@ select {
     font-weight: 600;
     color: #000000;
     background: #F3F4F6;
-    border-radius: 6px;
+    border-radius: 0;
     text-decoration: none;
     transition: all 0.2s ease;
 }
@@ -1751,7 +1751,7 @@ select {
     width: 40px;
     height: 40px;
     background: #000000;
-    border-radius: 8px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1812,7 +1812,7 @@ select {
     display: block;
     background: #FFFFFF;
     border: 1px solid #E5E5E5;
-    border-radius: 8px;
+    border-radius: 0;
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     text-decoration: none;
@@ -1938,7 +1938,7 @@ select {
     background: #000000;
     color: #FFFFFF;
     border: 2px solid #000000;
-    border-radius: 50px;
+    border-radius: 0;
     font-size: 14px;
     font-weight: 700;
     min-width: 200px;
@@ -1966,7 +1966,7 @@ select {
     padding: 12px;
     background: #F5F5F5;
     border: 1px solid #E5E5E5;
-    border-radius: 6px;
+    border-radius: 0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -2151,7 +2151,7 @@ select {
     border-spacing: 0;
     background: var(--gus-white);
     border: 2px solid var(--gus-gray-300);
-    border-radius: 8px;
+    border-radius: 0;
     overflow: hidden;
 }
 
@@ -2391,7 +2391,7 @@ select {
     height: 48px;
     background: var(--gus-gray-900);
     color: var(--gus-white);
-    border-radius: 50%;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2472,7 +2472,7 @@ select {
     justify-content: center;
     gap: 6px;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: 0;
     font-size: 12px;
     font-weight: 600;
     text-decoration: none;
@@ -2650,7 +2650,7 @@ select {
     width: 48px;
     height: 48px;
     background: var(--gus-gray-900);
-    border-radius: 12px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2672,7 +2672,7 @@ select {
     max-height: 800px;
     overflow-y: auto;
     border: 1px solid #E5E5E5;
-    border-radius: 12px;
+    border-radius: 0;
     background: #FFFFFF;
 }
 
@@ -2688,7 +2688,7 @@ select {
 
 .gus-related-grid::-webkit-scrollbar-thumb {
     background: #CCCCCC;
-    border-radius: 5px;
+    border-radius: 0;
     transition: background 0.2s ease;
 }
 
@@ -2699,7 +2699,7 @@ select {
 .gus-related-card {
     background: var(--gus-white);
     border: 2px solid var(--gus-gray-300);
-    border-radius: 12px;
+    border-radius: 0;
     padding: var(--gus-space-xl);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
@@ -2739,7 +2739,7 @@ select {
     height: 32px;
     background: var(--gus-gray-900);
     color: var(--gus-white);
-    border-radius: 50%;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2772,7 +2772,7 @@ select {
     margin-bottom: var(--gus-space-lg);
     padding: var(--gus-space-md);
     background: var(--gus-gray-50);
-    border-radius: 8px;
+    border-radius: 0;
 }
 
 .gus-related-card-meta-item {
@@ -3154,7 +3154,7 @@ select {
     background: linear-gradient(135deg, var(--gus-gray-50) 0%, var(--gus-white) 100%);
     border: none;
     border-left: 4px solid var(--gus-gray-900);
-    border-radius: 8px;
+    border-radius: 0;
     padding: var(--gus-space-2xl);
     margin-bottom: var(--gus-space-xl);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -3183,7 +3183,7 @@ select {
     align-items: center;
     justify-content: center;
     background: var(--gus-white);
-    border-radius: 12px;
+    border-radius: 0;
     flex-shrink: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
@@ -3271,14 +3271,14 @@ select {
     border-left: 4px solid var(--gus-gray-900);
     padding: var(--gus-space-lg);
     margin: var(--gus-space-lg) 0;
-    border-radius: 4px;
+    border-radius: 0;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 @media (max-width: 768px) {
     .gus-modern-section {
         padding: var(--gus-space-lg);
-        border-radius: 4px;
+        border-radius: 0;
     }
     
     .gus-modern-header {
@@ -3289,7 +3289,7 @@ select {
         font-size: 1.5rem;
         width: 48px;
         height: 48px;
-        border-radius: 8px;
+        border-radius: 0;
     }
     
     .gus-modern-title {
@@ -3376,7 +3376,7 @@ select {
     background: linear-gradient(135deg, #1a1a1a 0%, #000000 100%) !important;
     color: #FFFFFF !important;
     padding: 24px 28px;
-    border-radius: 12px 12px 0 0;
+    border-radius: 0;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     display: flex;
     align-items: center;
@@ -3404,7 +3404,7 @@ select {
     width: 48px;
     height: 48px;
     background: rgba(255, 255, 255, 0.15);
-    border-radius: 10px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3434,7 +3434,7 @@ select {
     margin-left: auto;
     padding: 6px 14px;
     background: rgba(255, 255, 255, 0.15);
-    border-radius: 20px;
+    border-radius: 0;
     white-space: nowrap;
 }
 
@@ -3442,7 +3442,7 @@ select {
     background: #FFFFFF !important;
     border: 2px solid #E5E5E5;
     border-top: none;
-    border-radius: 0 0 12px 12px;
+    border-radius: 0;
     padding: 32px 28px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     max-width: 100%;
@@ -3469,7 +3469,7 @@ select {
     height: auto !important;
     display: block;
     margin: 20px 0;
-    border-radius: 8px;
+    border-radius: 0;
 }
 
 .gus-details-content table {
@@ -3479,7 +3479,7 @@ select {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     margin: 20px 0;
-    border-radius: 8px;
+    border-radius: 0;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
     background: #FFFFFF !important;
 }
@@ -3495,7 +3495,7 @@ select {
     max-width: 100% !important;
     height: auto !important;
     margin: 20px 0;
-    border-radius: 8px;
+    border-radius: 0;
 }
 
 .gus-details-content pre {
@@ -3505,7 +3505,7 @@ select {
     word-wrap: break-word;
     background: #F5F5F5;
     padding: 16px;
-    border-radius: 8px;
+    border-radius: 0;
     margin: 20px 0;
     border-left: 4px solid #000000;
 }
@@ -3557,7 +3557,7 @@ select {
         padding: 18px 16px;
         gap: 12px;
         flex-wrap: wrap;
-        border-radius: 8px 8px 0 0;
+        border-radius: 0;
     }
     
     .gus-details-banner-icon {
@@ -3589,7 +3589,7 @@ select {
     .gus-details-content {
         padding: 20px 16px;
         font-size: 14px;
-        border-radius: 0 0 8px 8px;
+        border-radius: 0;
     }
     
     .gus-details-content p {
@@ -3629,7 +3629,7 @@ select {
     .gus-details-banner {
         padding: 14px 12px;
         gap: 8px;
-        border-radius: 6px 6px 0 0;
+        border-radius: 0;
     }
     
     .gus-details-banner-icon {
@@ -3659,7 +3659,7 @@ select {
     .gus-details-content {
         padding: 16px 12px;
         font-size: 13px;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0;
     }
     
     .gus-details-content p {
@@ -3849,7 +3849,7 @@ select {
     width: 72px;
     height: 72px;
     background: rgba(255, 215, 0, 0.1);
-    border-radius: 50%;
+    border-radius: 0;
     margin-bottom: var(--gus-space-lg);
     color: #FFD700;
 }
@@ -3894,7 +3894,7 @@ select {
     font-size: 1rem;
     font-weight: 600;
     text-decoration: none;
-    border-radius: 8px;
+    border-radius: 0;
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
@@ -4118,7 +4118,7 @@ select {
     background: var(--gus-white);
     color: var(--gus-gray-800);
     border: 2px solid var(--gus-gray-300);
-    border-radius: 6px;
+    border-radius: 0;
     font-size: var(--gus-text-sm);
     font-weight: 700;
     text-decoration: none;
