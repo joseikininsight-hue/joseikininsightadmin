@@ -339,12 +339,12 @@ if ($application_status === 'closed') {
     $robots_content = 'index, follow, max-snippet:160, max-image-preview:standard';
 }
 
-// 改善された関連補助金取得（スコアリングロジック）- 都道府県/市町村優先、次にカテゴリ/タグ
+// 改善されたレコメンドシステム - 同じ地域・カテゴリ・タグを優先
 function gi_get_scored_related_grants($post_id, $taxonomies, $grant_data, $limit = 12) {
     // より多くの候補を取得してスコアリング
     $candidate_args = array(
         'post_type' => 'grant',
-        'posts_per_page' => 50, // 候補プールを大きく
+        'posts_per_page' => 100, // 候補プールを大きく（より精度の高いレコメンド）
         'post__not_in' => array($post_id),
         'post_status' => 'publish',
     );
@@ -357,84 +357,108 @@ function gi_get_scored_related_grants($post_id, $taxonomies, $grant_data, $limit
             $candidates->the_post();
             $candidate_id = get_the_ID();
             $score = 0;
+            $match_details = array(); // マッチ詳細を記録
             
-            // 【最優先】都道府県一致: +30点
-            if (!empty($taxonomies['prefectures'])) {
-                $candidate_prefs = wp_get_post_terms($candidate_id, 'grant_prefecture', array('fields' => 'ids'));
-                $current_pref_ids = wp_list_pluck($taxonomies['prefectures'], 'term_id');
-                $pref_intersect = array_intersect($candidate_prefs, $current_pref_ids);
-                $score += count($pref_intersect) * 30;
-            }
-            
-            // 【最優先】市町村一致: +25点
+            // 【最優先】市町村完全一致: +100点（同じ市町村は最も関連性が高い）
             if (!empty($taxonomies['municipalities'])) {
                 $candidate_munis = wp_get_post_terms($candidate_id, 'grant_municipality', array('fields' => 'ids'));
                 $current_muni_ids = wp_list_pluck($taxonomies['municipalities'], 'term_id');
                 $muni_intersect = array_intersect($candidate_munis, $current_muni_ids);
-                $score += count($muni_intersect) * 25;
+                if (count($muni_intersect) > 0) {
+                    $score += count($muni_intersect) * 100;
+                    $match_details[] = '同じ市町村';
+                }
             }
             
-            // 全国対象: +20点（地域条件の次）
-            $candidate_prefs = wp_get_post_terms($candidate_id, 'grant_prefecture', array('fields' => 'slugs'));
-            if (in_array('zenkoku', $candidate_prefs) || in_array('nationwide', $candidate_prefs)) {
-                $score += 20;
+            // 【第2優先】都道府県一致: +50点（同じ都道府県）
+            if (!empty($taxonomies['prefectures'])) {
+                $candidate_prefs = wp_get_post_terms($candidate_id, 'grant_prefecture', array('fields' => 'ids'));
+                $current_pref_ids = wp_list_pluck($taxonomies['prefectures'], 'term_id');
+                $pref_intersect = array_intersect($candidate_prefs, $current_pref_ids);
+                if (count($pref_intersect) > 0) {
+                    $score += count($pref_intersect) * 50;
+                    $match_details[] = '同じ都道府県';
+                }
             }
             
-            // 【次に優先】カテゴリー一致: +10点
+            // 【第3優先】カテゴリー完全一致: +30点（同じ業種・目的）
             if (!empty($taxonomies['categories'])) {
                 $candidate_cats = wp_get_post_terms($candidate_id, 'grant_category', array('fields' => 'ids'));
                 $current_cat_ids = wp_list_pluck($taxonomies['categories'], 'term_id');
                 $cat_intersect = array_intersect($candidate_cats, $current_cat_ids);
-                $score += count($cat_intersect) * 10;
+                if (count($cat_intersect) > 0) {
+                    $score += count($cat_intersect) * 30;
+                    $match_details[] = '同じカテゴリ';
+                }
             }
             
-            // 【次に優先】タグ一致: +8点/タグ
+            // 【第4優先】タグ一致: +20点/タグ（詳細な条件マッチ）
             if (!empty($taxonomies['tags'])) {
                 $candidate_tags = wp_get_post_tags($candidate_id, array('fields' => 'ids'));
                 $current_tag_ids = wp_list_pluck($taxonomies['tags'], 'term_id');
                 $tag_intersect = array_intersect($candidate_tags, $current_tag_ids);
-                $score += count($tag_intersect) * 8;
+                if (count($tag_intersect) > 0) {
+                    $score += count($tag_intersect) * 20;
+                    $match_details[] = '同じタグ (' . count($tag_intersect) . '個)';
+                }
             }
             
-            // 補助金額が近い: +2点（参考程度）
+            // 全国対象補助金: +15点（どの地域でも申請可能）
+            $candidate_prefs_slugs = wp_get_post_terms($candidate_id, 'grant_prefecture', array('fields' => 'slugs'));
+            if (in_array('zenkoku', $candidate_prefs_slugs) || in_array('nationwide', $candidate_prefs_slugs)) {
+                $score += 15;
+                $match_details[] = '全国対象';
+            }
+            
+            // 補助金額が近い: +5点（似た規模の補助金）
             $candidate_amount = function_exists('get_field') ? intval(get_field('max_amount_numeric', $candidate_id)) : 0;
             $current_amount = $grant_data['max_amount_numeric'];
             if ($candidate_amount > 0 && $current_amount > 0) {
                 $amount_diff_ratio = abs($candidate_amount - $current_amount) / max($candidate_amount, $current_amount);
                 if ($amount_diff_ratio < 0.3) { // 30%以内の差
-                    $score += 2;
+                    $score += 5;
+                    $match_details[] = '似た金額';
                 }
             }
             
-            // 申請締切が近い（募集中）: +3点
-            $candidate_deadline = function_exists('get_field') ? get_field('deadline_date', $candidate_id) : '';
+            // 募集中の補助金: +10点（今申請できる）
             $candidate_status = function_exists('get_field') ? get_field('application_status', $candidate_id) : 'open';
-            if ($candidate_status === 'open' && !empty($candidate_deadline)) {
-                $deadline_timestamp = strtotime($candidate_deadline);
-                if ($deadline_timestamp && $deadline_timestamp > current_time('timestamp')) {
-                    $score += 3;
+            if ($candidate_status === 'open') {
+                $candidate_deadline = function_exists('get_field') ? get_field('deadline_date', $candidate_id) : '';
+                if (!empty($candidate_deadline)) {
+                    $deadline_timestamp = strtotime($candidate_deadline);
+                    if ($deadline_timestamp && $deadline_timestamp > current_time('timestamp')) {
+                        $score += 10;
+                        $match_details[] = '募集中';
+                    }
                 }
             }
             
-            // 閲覧数が多い: +1点
+            // 人気の補助金: +3点（多くの人が見ている）
             $candidate_views = function_exists('get_field') ? intval(get_field('views_count', $candidate_id)) : 0;
             if ($candidate_views > 100) {
-                $score += 1;
+                $score += 3;
             }
             
-            // 全ての候補を追加（スコア0でも）
-            $scored_grants[] = array(
-                'id' => $candidate_id,
-                'score' => $score,
-                'title' => get_the_title(),
-                'permalink' => get_permalink(),
-            );
+            // スコアが0より大きい場合のみ追加（何らかのマッチがある）
+            if ($score > 0) {
+                $scored_grants[] = array(
+                    'id' => $candidate_id,
+                    'score' => $score,
+                    'title' => get_the_title(),
+                    'permalink' => get_permalink(),
+                    'match_details' => implode(', ', $match_details),
+                );
+            }
         }
         wp_reset_postdata();
     }
     
-    // スコア降順でソート
+    // スコアが高い順にソート（同スコアの場合は新しい順）
     usort($scored_grants, function($a, $b) {
+        if ($a['score'] === $b['score']) {
+            return $b['id'] - $a['id']; // 新しい投稿を優先
+        }
         return $b['score'] - $a['score'];
     });
     
@@ -4454,7 +4478,7 @@ select {
                     <div style="flex: 1;">
                         <h2 class="gus-related-section-title">あなたにおすすめの補助金</h2>
                         <p style="font-size: var(--gus-text-sm); color: var(--gus-gray-600); margin: 8px 0 0 0; font-weight: 500;">
-                            カテゴリー、地域、金額などの類似性に基づいて選ばれた補助金です
+                            同じ市町村・都道府県・カテゴリ・タグの補助金を優先的に表示しています
                         </p>
                     </div>
                 </header>
@@ -5099,34 +5123,59 @@ select {
                         $sidebar_related_id = get_the_ID();
                         $count++;
                         
-                        // 一致タグを1つだけ表示
-                        $sidebar_match_tag = '';
-                        $sidebar_cats = wp_get_post_terms($sidebar_related_id, 'grant_category', array('fields' => 'names'));
-                        if (!empty($sidebar_cats) && !empty($taxonomies['categories'])) {
-                            $current_cat_names = wp_list_pluck($taxonomies['categories'], 'name');
-                            $sidebar_cat_match = array_intersect($sidebar_cats, $current_cat_names);
-                            if (!empty($sidebar_cat_match)) {
-                                $sidebar_match_tag = reset($sidebar_cat_match);
+                        // より詳細なマッチ理由を表示（優先順位順）
+                        $sidebar_match_tags = array();
+                        
+                        // 市町村一致チェック（最優先）
+                        $sidebar_munis = wp_get_post_terms($sidebar_related_id, 'grant_municipality', array('fields' => 'names'));
+                        if (!empty($sidebar_munis) && !empty($taxonomies['municipalities'])) {
+                            $current_muni_names = wp_list_pluck($taxonomies['municipalities'], 'name');
+                            $sidebar_muni_match = array_intersect($sidebar_munis, $current_muni_names);
+                            if (!empty($sidebar_muni_match)) {
+                                $sidebar_match_tags[] = '📍 ' . reset($sidebar_muni_match);
                             }
                         }
                         
-                        if (empty($sidebar_match_tag)) {
+                        // 都道府県一致チェック
+                        if (empty($sidebar_match_tags)) {
                             $sidebar_prefs = wp_get_post_terms($sidebar_related_id, 'grant_prefecture', array('fields' => 'names'));
                             if (!empty($sidebar_prefs) && !empty($taxonomies['prefectures'])) {
                                 $current_pref_names = wp_list_pluck($taxonomies['prefectures'], 'name');
                                 $sidebar_pref_match = array_intersect($sidebar_prefs, $current_pref_names);
                                 if (!empty($sidebar_pref_match)) {
-                                    $sidebar_match_tag = reset($sidebar_pref_match);
+                                    $sidebar_match_tags[] = '📍 ' . reset($sidebar_pref_match);
                                 }
                             }
                         }
+                        
+                        // カテゴリー一致チェック
+                        $sidebar_cats = wp_get_post_terms($sidebar_related_id, 'grant_category', array('fields' => 'names'));
+                        if (!empty($sidebar_cats) && !empty($taxonomies['categories'])) {
+                            $current_cat_names = wp_list_pluck($taxonomies['categories'], 'name');
+                            $sidebar_cat_match = array_intersect($sidebar_cats, $current_cat_names);
+                            if (!empty($sidebar_cat_match)) {
+                                $sidebar_match_tags[] = '🏷️ ' . reset($sidebar_cat_match);
+                            }
+                        }
+                        
+                        // タグ一致チェック
+                        $sidebar_tags = wp_get_post_tags($sidebar_related_id, array('fields' => 'names'));
+                        if (!empty($sidebar_tags) && !empty($taxonomies['tags'])) {
+                            $current_tag_names = wp_list_pluck($taxonomies['tags'], 'name');
+                            $sidebar_tag_match = array_intersect($sidebar_tags, $current_tag_names);
+                            if (!empty($sidebar_tag_match) && count($sidebar_match_tags) < 2) {
+                                $sidebar_match_tags[] = '🔖 ' . reset($sidebar_tag_match);
+                            }
+                        }
+                        
+                        $sidebar_match_display = !empty($sidebar_match_tags) ? implode(' / ', array_slice($sidebar_match_tags, 0, 2)) : '';
                     ?>
                     <a href="<?php the_permalink(); ?>" 
                        class="gus-related-mini-item"
                        aria-label="<?php echo esc_attr(get_the_title() . 'の詳細を見る'); ?>">
-                        <?php if ($sidebar_match_tag): ?>
-                        <div style="font-size: 10px; color: #666; margin-bottom: 4px; font-weight: 600;">
-                            <?php echo esc_html($sidebar_match_tag); ?>
+                        <?php if ($sidebar_match_display): ?>
+                        <div style="font-size: 10px; color: #666; margin-bottom: 4px; font-weight: 600; line-height: 1.4;">
+                            <?php echo esc_html($sidebar_match_display); ?>
                         </div>
                         <?php endif; ?>
                         <div class="gus-related-mini-title">
