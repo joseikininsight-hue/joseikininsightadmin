@@ -113,6 +113,91 @@ foreach ($taxonomies as $key => $terms) {
     }
 }
 
+// 都道府県の表示ロジック
+function gi_format_prefectures($prefectures) {
+    if (empty($prefectures)) {
+        return '';
+    }
+    
+    // 全国かどうかをチェック
+    $is_nationwide = false;
+    foreach ($prefectures as $pref) {
+        if (in_array($pref->slug, array('zenkoku', 'nationwide'))) {
+            $is_nationwide = true;
+            break;
+        }
+    }
+    
+    if ($is_nationwide) {
+        return '全国';
+    }
+    
+    // 47都道府県すべてが選択されている場合
+    $total_prefectures = count($prefectures);
+    if ($total_prefectures >= 47) {
+        return '全国';
+    }
+    
+    // 5個以上の場合は最初の4個+...
+    if ($total_prefectures >= 5) {
+        $display_prefs = array_slice($prefectures, 0, 4);
+        $names = array_map(function($pref) { return $pref->name; }, $display_prefs);
+        return implode('、', $names) . '...';
+    }
+    
+    // 5個未満はすべて表示
+    $names = array_map(function($pref) { return $pref->name; }, $prefectures);
+    return implode('、', $names);
+}
+
+// 市町村の表示ロジック
+function gi_format_municipalities($municipalities, $prefectures) {
+    if (empty($municipalities)) {
+        return '';
+    }
+    
+    // 全国の場合は市町村を表示しない
+    if (!empty($prefectures)) {
+        foreach ($prefectures as $pref) {
+            if (in_array($pref->slug, array('zenkoku', 'nationwide'))) {
+                return '';
+            }
+        }
+    }
+    
+    // 47都道府県すべてが選択されている場合
+    if (!empty($prefectures) && count($prefectures) >= 47) {
+        return '';
+    }
+    
+    // 都道府県全域かどうかをチェック（市町村数で判定）
+    // 仮に各都道府県の市町村数を取得して比較する必要があるが、
+    // ここではシンプルに「全域」というslugやnameがあるかチェック
+    foreach ($municipalities as $muni) {
+        if (stripos($muni->name, '全域') !== false || stripos($muni->slug, 'zeniki') !== false) {
+            // 都道府県名を取得
+            if (!empty($prefectures)) {
+                return $prefectures[0]->name . '全域';
+            }
+        }
+    }
+    
+    // 5個以上の場合は最初の4個+...
+    $total_municipalities = count($municipalities);
+    if ($total_municipalities >= 5) {
+        $display_munis = array_slice($municipalities, 0, 4);
+        $names = array_map(function($muni) { return $muni->name; }, $display_munis);
+        return implode('、', $names) . '...';
+    }
+    
+    // 5個未満はすべて表示
+    $names = array_map(function($muni) { return $muni->name; }, $municipalities);
+    return implode('、', $names);
+}
+
+$prefecture_display = gi_format_prefectures($taxonomies['prefectures']);
+$municipality_display = gi_format_municipalities($taxonomies['municipalities'], $taxonomies['prefectures']);
+
 // 金額フォーマット
 $formatted_amount = '';
 $max_amount_yen = intval($grant_data['max_amount_numeric']);
@@ -254,23 +339,227 @@ if ($application_status === 'closed') {
     $robots_content = 'index, follow, max-snippet:160, max-image-preview:standard';
 }
 
-// 関連補助金取得
-$related_args = array(
-    'post_type' => 'grant',
-    'posts_per_page' => 6,
-    'post__not_in' => array($post_id),
-    'post_status' => 'publish',
-    'orderby' => 'rand',
-);
+// 改善されたレコメンドシステム - 同じ地域・カテゴリ・タグを優先
+function gi_get_scored_related_grants($post_id, $taxonomies, $grant_data, $limit = 12, $debug_mode = false) {
+    // デバッグモード（本番環境ではfalse）
+    
+    if ($debug_mode) {
+        error_log('=== レコメンドシステム デバッグ開始 ===');
+        error_log('現在の投稿ID: ' . $post_id);
+        error_log('市町村数: ' . count($taxonomies['municipalities']));
+        error_log('都道府県数: ' . count($taxonomies['prefectures']));
+        error_log('カテゴリ数: ' . count($taxonomies['categories']));
+        error_log('タグ数: ' . count($taxonomies['tags']));
+    }
+    
+    // より多くの候補を取得してスコアリング
+    $candidate_args = array(
+        'post_type' => 'grant',
+        'posts_per_page' => 100, // 候補プールを大きく（より精度の高いレコメンド）
+        'post__not_in' => array($post_id),
+        'post_status' => 'publish',
+    );
+    
+    $candidates = new WP_Query($candidate_args);
+    $scored_grants = array();
+    
+    if ($debug_mode) {
+        error_log('候補補助金数: ' . $candidates->found_posts);
+    }
+    
+    if ($candidates->have_posts()) {
+        while ($candidates->have_posts()) {
+            $candidates->the_post();
+            $candidate_id = get_the_ID();
+            $score = 0;
+            $match_details = array(); // マッチ詳細を記録
+            
+            // 【最優先】市町村完全一致: +100点（同じ市町村は最も関連性が高い）
+            if (!empty($taxonomies['municipalities'])) {
+                $candidate_munis = wp_get_post_terms($candidate_id, 'grant_municipality', array('fields' => 'ids'));
+                $current_muni_ids = wp_list_pluck($taxonomies['municipalities'], 'term_id');
+                $muni_intersect = array_intersect($candidate_munis, $current_muni_ids);
+                if (count($muni_intersect) > 0) {
+                    $score += count($muni_intersect) * 100;
+                    $match_details[] = '同じ市町村';
+                }
+            }
+            
+            // 【第2優先】都道府県一致: +50点（同じ都道府県）
+            if (!empty($taxonomies['prefectures'])) {
+                $candidate_prefs = wp_get_post_terms($candidate_id, 'grant_prefecture', array('fields' => 'ids'));
+                $current_pref_ids = wp_list_pluck($taxonomies['prefectures'], 'term_id');
+                $pref_intersect = array_intersect($candidate_prefs, $current_pref_ids);
+                if (count($pref_intersect) > 0) {
+                    $score += count($pref_intersect) * 50;
+                    $match_details[] = '同じ都道府県';
+                }
+            }
+            
+            // 【第3優先】カテゴリー完全一致: +30点（同じ業種・目的）
+            if (!empty($taxonomies['categories'])) {
+                $candidate_cats = wp_get_post_terms($candidate_id, 'grant_category', array('fields' => 'ids'));
+                $current_cat_ids = wp_list_pluck($taxonomies['categories'], 'term_id');
+                $cat_intersect = array_intersect($candidate_cats, $current_cat_ids);
+                if (count($cat_intersect) > 0) {
+                    $score += count($cat_intersect) * 30;
+                    $match_details[] = '同じカテゴリ';
+                }
+            }
+            
+            // 【第4優先】タグ一致: +20点/タグ（詳細な条件マッチ）
+            if (!empty($taxonomies['tags'])) {
+                $candidate_tags = wp_get_post_tags($candidate_id, array('fields' => 'ids'));
+                $current_tag_ids = wp_list_pluck($taxonomies['tags'], 'term_id');
+                $tag_intersect = array_intersect($candidate_tags, $current_tag_ids);
+                if (count($tag_intersect) > 0) {
+                    $score += count($tag_intersect) * 20;
+                    $match_details[] = '同じタグ (' . count($tag_intersect) . '個)';
+                }
+            }
+            
+            // 全国対象補助金: +15点（どの地域でも申請可能）
+            $candidate_prefs_slugs = wp_get_post_terms($candidate_id, 'grant_prefecture', array('fields' => 'slugs'));
+            if (in_array('zenkoku', $candidate_prefs_slugs) || in_array('nationwide', $candidate_prefs_slugs)) {
+                $score += 15;
+                $match_details[] = '全国対象';
+            }
+            
+            // 補助金額が近い: +5点（似た規模の補助金）
+            $candidate_amount = function_exists('get_field') ? intval(get_field('max_amount_numeric', $candidate_id)) : 0;
+            $current_amount = $grant_data['max_amount_numeric'];
+            if ($candidate_amount > 0 && $current_amount > 0) {
+                $amount_diff_ratio = abs($candidate_amount - $current_amount) / max($candidate_amount, $current_amount);
+                if ($amount_diff_ratio < 0.3) { // 30%以内の差
+                    $score += 5;
+                    $match_details[] = '似た金額';
+                }
+            }
+            
+            // 募集中の補助金: +10点（今申請できる）
+            $candidate_status = function_exists('get_field') ? get_field('application_status', $candidate_id) : 'open';
+            if ($candidate_status === 'open') {
+                $candidate_deadline = function_exists('get_field') ? get_field('deadline_date', $candidate_id) : '';
+                if (!empty($candidate_deadline)) {
+                    $deadline_timestamp = strtotime($candidate_deadline);
+                    if ($deadline_timestamp && $deadline_timestamp > current_time('timestamp')) {
+                        $score += 10;
+                        $match_details[] = '募集中';
+                    }
+                }
+            }
+            
+            // 人気の補助金: +3点（多くの人が見ている）
+            $candidate_views = function_exists('get_field') ? intval(get_field('views_count', $candidate_id)) : 0;
+            if ($candidate_views > 100) {
+                $score += 3;
+            }
+            
+            // すべての候補を追加（スコア0でもフォールバック用に保持）
+            $scored_grants[] = array(
+                'id' => $candidate_id,
+                'score' => $score,
+                'title' => get_the_title(),
+                'permalink' => get_permalink(),
+                'match_details' => !empty($match_details) ? implode(', ', $match_details) : '新着',
+            );
+        }
+        wp_reset_postdata();
+    }
+    
+    // スコアが高い順にソート（同スコアの場合は新しい順）
+    usort($scored_grants, function($a, $b) {
+        if ($a['score'] === $b['score']) {
+            return $b['id'] - $a['id']; // 新しい投稿を優先
+        }
+        return $b['score'] - $a['score'];
+    });
+    
+    // デバッグ: トップ5のスコアを出力
+    if ($debug_mode && !empty($scored_grants)) {
+        error_log('トップ5のスコア:');
+        for ($i = 0; $i < min(5, count($scored_grants)); $i++) {
+            error_log(sprintf(
+                '  #%d: ID=%d, スコア=%d, マッチ=%s, タイトル=%s',
+                $i + 1,
+                $scored_grants[$i]['id'],
+                $scored_grants[$i]['score'],
+                $scored_grants[$i]['match_details'],
+                $scored_grants[$i]['title']
+            ));
+        }
+        error_log('=== レコメンドシステム デバッグ終了 ===');
+    }
+    
+    // 上位N件を返す
+    return array_slice($scored_grants, 0, $limit);
+}
 
-if (!empty($taxonomies['categories'])) {
-    $related_args['tax_query'] = array(
-        array(
+$scored_related_grants = gi_get_scored_related_grants($post_id, $taxonomies, $grant_data, 12);
+
+// 従来のWP_Queryフォーマットに変換（既存コードとの互換性のため）
+$related_grant_ids = array();
+if (!empty($scored_related_grants)) {
+    foreach ($scored_related_grants as $grant) {
+        if (isset($grant['id'])) {
+            $related_grant_ids[] = $grant['id'];
+        }
+    }
+}
+
+if (!empty($related_grant_ids)) {
+    $related_args = array(
+        'post_type' => 'grant',
+        'posts_per_page' => 12,
+        'post__in' => $related_grant_ids,
+        'orderby' => 'post__in',
+        'post_status' => 'publish',
+    );
+} else {
+    // フォールバック: 地域優先で補助金を表示
+    $related_args = array(
+        'post_type' => 'grant',
+        'posts_per_page' => 12,
+        'post__not_in' => array($post_id),
+        'post_status' => 'publish',
+        'orderby' => 'date',
+        'order' => 'DESC',
+    );
+    
+    // 優先順位: 1. 市町村 > 2. 都道府県 > 3. カテゴリー
+    $tax_query = array('relation' => 'OR');
+    $has_tax_query = false;
+    
+    if (!empty($taxonomies['municipalities'])) {
+        $tax_query[] = array(
+            'taxonomy' => 'grant_municipality',
+            'field' => 'term_id',
+            'terms' => wp_list_pluck($taxonomies['municipalities'], 'term_id'),
+        );
+        $has_tax_query = true;
+    }
+    
+    if (!empty($taxonomies['prefectures'])) {
+        $tax_query[] = array(
+            'taxonomy' => 'grant_prefecture',
+            'field' => 'term_id',
+            'terms' => wp_list_pluck($taxonomies['prefectures'], 'term_id'),
+        );
+        $has_tax_query = true;
+    }
+    
+    if (!empty($taxonomies['categories'])) {
+        $tax_query[] = array(
             'taxonomy' => 'grant_category',
             'field' => 'term_id',
-            'terms' => $taxonomies['categories'][0]->term_id,
-        ),
-    );
+            'terms' => wp_list_pluck($taxonomies['categories'], 'term_id'),
+        );
+        $has_tax_query = true;
+    }
+    
+    if ($has_tax_query) {
+        $related_args['tax_query'] = $tax_query;
+    }
 }
 
 $related_query = new WP_Query($related_args);
@@ -672,7 +961,7 @@ select {
 .gus-sidebar-card {
     background: #FFFFFF;
     border: 1px solid #E5E5E5;
-    border-radius: 8px;
+    border-radius: 0;
     padding: 16px;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -735,7 +1024,7 @@ select {
 .gus-pc-ai-permanent {
     background: #FFFFFF;
     border: 2px solid #E5E5E5;
-    border-radius: 12px;
+    border-radius: 0;
     display: flex;
     flex-direction: column;
     height: 800px;
@@ -801,7 +1090,7 @@ select {
 
 .gus-pc-ai-permanent-messages::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.2);
-    border-radius: 3px;
+    border-radius: 0;
 }
 
 .gus-pc-ai-permanent-messages::-webkit-scrollbar-thumb:hover {
@@ -825,7 +1114,7 @@ select {
     flex: 1;
     padding: 12px 14px;
     border: 2px solid #E5E5E5;
-    border-radius: 10px;
+    border-radius: 0;
     font-size: 13px;
     font-family: inherit;
     min-height: 44px;
@@ -853,7 +1142,7 @@ select {
     background: #000000;
     color: #FFFFFF;
     border: 2px solid #000000;
-    border-radius: 10px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -887,7 +1176,7 @@ select {
     background: #F8F8F8;
     color: #1A1A1A;
     border: 1px solid #E5E5E5;
-    border-radius: 16px;
+    border-radius: 0;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
@@ -934,7 +1223,7 @@ select {
 .gus-ai-message-avatar {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -958,7 +1247,7 @@ select {
 .gus-ai-message-content {
     background: #F8F8F8;
     padding: 11px 14px;
-    border-radius: 10px;
+    border-radius: 0;
     border: 1px solid #E5E5E5;
     font-size: 12px;
     line-height: 1.6;
@@ -984,7 +1273,7 @@ select {
 .gus-ai-typing-dots {
     background: #F8F8F8;
     padding: 11px 14px;
-    border-radius: 10px;
+    border-radius: 0;
     border: 1px solid #E5E5E5;
     display: flex;
     gap: 4px;
@@ -995,7 +1284,7 @@ select {
     width: 6px;
     height: 6px;
     background: #666666;
-    border-radius: 50%;
+    border-radius: 0;
     animation: typing 1.4s infinite;
 }
 
@@ -1037,7 +1326,7 @@ select {
     font-size: 12px;
     font-weight: 500;
     border-left: 2px solid transparent;
-    border-radius: 4px;
+    border-radius: 0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1060,7 +1349,7 @@ select {
     background: var(--gus-gray-900);
     color: var(--gus-white);
     border: none;
-    border-radius: 50%;
+    border-radius: 0;
     width: 56px;
     height: 56px;
     cursor: pointer;
@@ -1132,8 +1421,8 @@ select {
     left: 0;
     right: 0;
     background: var(--gus-white);
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
     padding: var(--gus-space-xl) var(--gus-space-lg);
     max-height: 70vh;
     overflow-y: auto;
@@ -1193,7 +1482,7 @@ select {
 .gus-mobile-toc-list .gus-toc-link {
     font-size: 0.75rem;
     padding: 8px var(--gus-space-sm);
-    border-radius: 4px;
+    border-radius: 0;
     min-height: 36px;
     display: flex;
     align-items: center;
@@ -1266,7 +1555,7 @@ select {
 
 .gus-ai-chat-messages::-webkit-scrollbar-thumb {
     background: #E5E5E5;
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 .gus-ai-chat-messages::-webkit-scrollbar-thumb:hover {
@@ -1291,7 +1580,7 @@ select {
     flex: 1;
     padding: 12px 14px;
     border: 2px solid #E5E5E5 !important;
-    border-radius: 12px;
+    border-radius: 0;
     font-size: 16px !important;
     font-family: inherit;
     min-height: 44px;
@@ -1321,7 +1610,7 @@ select {
     background: #000000;
     color: #FFFFFF;
     border: 2px solid #000000;
-    border-radius: 12px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1361,7 +1650,7 @@ select {
     background: #F8F8F8;
     color: #1A1A1A;
     border: 1px solid #E5E5E5;
-    border-radius: 20px;
+    border-radius: 0;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -1386,10 +1675,10 @@ select {
 }
 
 .gus-related-mini-item {
-    padding: 12px;
+    padding: 14px;
     background: #FFFFFF;
     border: 1px solid #E5E5E5;
-    border-radius: 6px;
+    border-radius: 0;
     text-decoration: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1401,13 +1690,13 @@ select {
 }
 
 .gus-related-mini-title {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     color: #000000;
     margin-bottom: 6px;
-    line-height: 1.5;
+    line-height: 1.6;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -1432,7 +1721,7 @@ select {
     padding: 14px;
     background: #F9FAFB;
     border: 1px solid #E5E7EB;
-    border-radius: 8px;
+    border-radius: 0;
     text-decoration: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     gap: 12px;
@@ -1508,7 +1797,7 @@ select {
     font-weight: 600;
     color: #000000;
     background: #F3F4F6;
-    border-radius: 6px;
+    border-radius: 0;
     text-decoration: none;
     transition: all 0.2s ease;
 }
@@ -1527,64 +1816,98 @@ select {
     transform: translateX(3px);
 }
 
-/* 関連コラム記事セクション - PC/モバイル共通 */
+/* 関連コラム記事セクション - Yahoo News Style */
 .gus-related-columns-section {
     margin-top: var(--gus-space-2xl);
     margin-bottom: var(--gus-space-2xl);
+    padding: var(--gus-space-2xl) 0;
+    background: linear-gradient(180deg, #FAFAFA 0%, #FFFFFF 100%);
+    border-top: 3px solid #E5E5E5;
 }
 
-.gus-related-columns-intro {
-    margin-top: 16px;
-    margin-bottom: 24px;
-    padding: 20px 24px;
-    background: linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%);
-    border-left: 4px solid #000000;
-    border-radius: 8px;
+.gus-related-section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--gus-space-md);
+    margin-bottom: var(--gus-space-xl);
 }
 
-.gus-related-columns-intro p {
-    margin: 0;
-    font-size: 15px;
-    line-height: 1.7;
-    color: #374151;
+.gus-related-section-icon {
+    width: 40px;
+    height: 40px;
+    background: #000000;
+    border-radius: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .gus-related-section-icon svg {
     display: block;
-    width: 24px;
-    height: 24px;
-    stroke: #000000;
+    width: 22px;
+    height: 22px;
+    stroke: #FFFFFF;
+}
+
+.gus-related-section-title {
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: #000000;
+    margin: 0 0 8px 0;
+    letter-spacing: -0.02em;
+}
+
+.gus-related-columns-intro {
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+}
+
+.gus-related-columns-intro p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #666666;
 }
 
 .gus-related-columns-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 24px;
-    margin-top: 24px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: var(--gus-space-xl);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
     .gus-related-columns-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
         gap: 16px;
     }
 }
 
+@media (max-width: 640px) {
+    .gus-related-columns-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+}
+
 .gus-related-column-card {
-    display: flex;
-    flex-direction: column;
+    display: block;
     background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-radius: 12px;
+    border: 1px solid #E5E5E5;
+    border-radius: 0;
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    text-decoration: none;
     height: 100%;
 }
 
 .gus-related-column-card:hover {
     border-color: #000000;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    transform: translateY(-4px);
 }
 
 .gus-related-column-thumbnail {
@@ -1592,7 +1915,7 @@ select {
     width: 100%;
     padding-top: 56.25%; /* 16:9 aspect ratio */
     overflow: hidden;
-    background: #F3F4F6;
+    background: linear-gradient(135deg, #F5F5F5 0%, #E5E5E5 100%);
 }
 
 .gus-related-column-thumbnail a {
@@ -1610,25 +1933,25 @@ select {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s ease;
+    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .gus-related-column-card:hover .gus-related-column-thumbnail img {
-    transform: scale(1.05);
+    transform: scale(1.08);
 }
 
 .gus-related-column-card-content {
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    padding: 20px;
-    flex: 1;
+    gap: 10px;
 }
 
 .gus-related-column-card-meta {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: 12px;
-    margin-bottom: 12px;
+    flex-wrap: wrap;
 }
 
 .gus-related-column-category,
@@ -1636,74 +1959,81 @@ select {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
-    color: #6B7280;
+    font-size: 11px;
+    color: #999999;
+    font-weight: 600;
 }
 
 .gus-related-column-category svg,
 .gus-related-column-read-time svg {
     flex-shrink: 0;
+    width: 12px;
+    height: 12px;
 }
 
 .gus-related-column-card-title {
-    margin: 0 0 12px 0;
-    font-size: 16px;
+    margin: 0;
+    font-size: 15px;
     line-height: 1.5;
-    font-weight: 600;
+    font-weight: 700;
+    color: #1a1a1a;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 45px;
 }
 
 .gus-related-column-card-title a {
-    color: #111827;
+    color: inherit;
     text-decoration: none;
-    transition: color 0.2s ease;
 }
 
-.gus-related-column-card-title a:hover {
+.gus-related-column-card:hover .gus-related-column-card-title {
     color: #000000;
 }
 
 .gus-related-column-card-excerpt {
-    margin: 0 0 16px 0;
-    font-size: 14px;
+    margin: 0;
+    font-size: 13px;
     line-height: 1.6;
-    color: #6B7280;
-    flex: 1;
+    color: #666666;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .gus-related-column-card-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    color: #000000;
-    text-decoration: none;
-    transition: all 0.2s ease;
-    margin-top: auto;
-}
-
-.gus-related-column-card-link:hover {
-    gap: 10px;
-}
-
-.gus-related-column-card-link svg {
-    transition: transform 0.2s ease;
-}
-
-.gus-related-column-card-link:hover svg {
-    transform: translateX(2px);
+    display: none;
 }
 
 .gus-related-columns-footer {
-    margin-top: 24px;
+    margin-top: var(--gus-space-2xl);
     text-align: center;
+    padding-top: var(--gus-space-xl);
+    border-top: 2px solid #E5E5E5;
 }
 
 .gus-related-columns-footer .gus-btn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 24px;
+    gap: 10px;
+    padding: 14px 32px;
+    background: #000000;
+    color: #FFFFFF;
+    border: 2px solid #000000;
+    border-radius: 0;
+    font-size: 14px;
+    font-weight: 700;
+    min-width: 200px;
+}
+
+.gus-related-columns-footer .gus-btn:hover {
+    background: #FFFFFF;
+    color: #000000;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
 }
 
 .gus-related-columns-footer .gus-btn:hover svg {
@@ -1721,7 +2051,7 @@ select {
     padding: 12px;
     background: #F5F5F5;
     border: 1px solid #E5E5E5;
-    border-radius: 6px;
+    border-radius: 0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1857,6 +2187,9 @@ select {
     font-size: var(--gus-text-base);
     color: var(--gus-gray-700);
     line-height: 1.7;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    overflow-x: hidden;
 }
 
 .gus-section-content p {
@@ -1902,26 +2235,29 @@ select {
     border-collapse: separate;
     border-spacing: 0;
     background: var(--gus-white);
-    border: 1px solid var(--gus-gray-300);
-    border-radius: var(--gus-radius);
+    border: 2px solid var(--gus-gray-300);
+    border-radius: 0;
     overflow: hidden;
 }
 
 .gus-table th,
 .gus-table td {
-    padding: var(--gus-space-md) var(--gus-space-lg);
+    padding: 16px 20px;
     text-align: left;
-    border-bottom: 1px solid var(--gus-gray-300);
+    border-bottom: 1px solid var(--gus-gray-200);
     font-size: var(--gus-text-sm);
-    line-height: 1.6;
+    line-height: 1.8;
 }
 
 .gus-table th {
-    background: var(--gus-gray-100);
-    font-weight: 700;
-    color: var(--gus-gray-700);
-    width: 35%;
+    background: linear-gradient(135deg, var(--gus-gray-50) 0%, var(--gus-gray-100) 100%);
+    font-weight: 800;
+    color: var(--gus-black);
+    width: 200px;
+    min-width: 160px;
     vertical-align: top;
+    white-space: nowrap;
+    border-right: 2px solid var(--gus-gray-300);
 }
 
 .gus-table td {
@@ -1933,6 +2269,166 @@ select {
 .gus-table tr:last-child th,
 .gus-table tr:last-child td {
     border-bottom: none;
+}
+
+.gus-table tr:hover {
+    background: var(--gus-gray-50);
+}
+
+/* 統合された詳細テーブル用の拡張スタイル */
+.gus-table-comprehensive td {
+    padding: 18px 20px;
+}
+
+.gus-table-comprehensive td ul,
+.gus-table-comprehensive td ol {
+    margin: 8px 0;
+    padding-left: 24px;
+}
+
+.gus-table-comprehensive td li {
+    margin-bottom: 6px;
+}
+
+/* タイトル行スタイル - 表と一体化した目立つヘッダー */
+.gus-table-title-row {
+    background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
+}
+
+.gus-table-title-row:hover {
+    background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%) !important;
+}
+
+.gus-table-title-cell {
+    padding: 24px 28px !important;
+    text-align: left !important;
+    border-right: none !important;
+    border-bottom: 3px solid #FFD700 !important;
+    background: transparent !important;
+    vertical-align: middle !important;
+}
+
+.gus-table-title-cell h1 {
+    margin: 0;
+    padding: 0;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.6;
+    color: #FFFFFF;
+    text-align: left;
+    letter-spacing: 0.01em;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+}
+
+/* タブレット: 中サイズ */
+@media (max-width: 1024px) {
+    .gus-table-title-cell {
+        padding: 20px 24px !important;
+    }
+    
+    .gus-table-title-cell h1 {
+        font-size: 19px;
+        line-height: 1.65;
+    }
+}
+
+/* タブレット縦・大きめモバイル */
+@media (max-width: 768px) {
+    .gus-table-title-cell {
+        padding: 18px 20px !important;
+    }
+    
+    .gus-table-title-cell h1 {
+        font-size: 17px;
+        line-height: 1.7;
+    }
+}
+
+/* モバイル: 小さい画面（iPhone 14 Pro Max: 430px） */
+@media (max-width: 480px) {
+    .gus-table-title-cell {
+        padding: 14px 14px !important;
+    }
+    
+    .gus-table-title-cell h1 {
+        font-size: 14px;
+        line-height: 1.8;
+        letter-spacing: 0;
+        word-break: break-word;
+    }
+}
+
+/* 極小モバイル */
+@media (max-width: 360px) {
+    .gus-table-title-cell {
+        padding: 12px 10px !important;
+    }
+    
+    .gus-table-title-cell h1 {
+        font-size: 13px;
+        line-height: 1.85;
+        word-break: break-word;
+    }
+}
+
+/* テーブル本体のモバイル対応 */
+@media (max-width: 768px) {
+    .gus-table th {
+        width: 100px;
+        min-width: 80px;
+        padding: 12px 14px;
+        font-size: 13px;
+    }
+    
+    .gus-table td {
+        padding: 12px 14px;
+        font-size: 14px;
+    }
+    
+    .gus-table-comprehensive td {
+        padding: 14px 14px;
+    }
+}
+
+@media (max-width: 480px) {
+    .gus-table th {
+        width: 85px;
+        min-width: 70px;
+        padding: 10px 10px;
+        font-size: 12px;
+        white-space: normal;
+        line-height: 1.4;
+    }
+    
+    .gus-table td {
+        padding: 10px 10px;
+        font-size: 13px;
+        line-height: 1.65;
+    }
+    
+    .gus-table-comprehensive td {
+        padding: 12px 10px;
+    }
+}
+
+@media (max-width: 360px) {
+    .gus-table th {
+        width: 75px;
+        min-width: 65px;
+        padding: 8px 8px;
+        font-size: 11px;
+    }
+    
+    .gus-table td {
+        padding: 8px 8px;
+        font-size: 12px;
+    }
+    
+    .gus-table-comprehensive td {
+        padding: 10px 8px;
+    }
 }
 
 /* 難易度 */
@@ -1980,7 +2476,7 @@ select {
     height: 48px;
     background: var(--gus-gray-900);
     color: var(--gus-white);
-    border-radius: 50%;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2061,7 +2557,7 @@ select {
     justify-content: center;
     gap: 6px;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: 0;
     font-size: 12px;
     font-weight: 600;
     text-decoration: none;
@@ -2239,7 +2735,7 @@ select {
     width: 48px;
     height: 48px;
     background: var(--gus-gray-900);
-    border-radius: 12px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2255,124 +2751,166 @@ select {
 }
 
 .gus-related-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: var(--gus-space-xl);
-}
-
-.gus-related-card {
-    background: var(--gus-white);
-    border: 2px solid var(--gus-gray-300);
-    border-radius: 12px;
-    padding: var(--gus-space-xl);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
+    gap: 0;
+    max-height: 800px;
+    overflow-y: auto;
+    border: 1px solid #E5E5E5;
+    border-radius: 0;
+    background: #FFFFFF;
+}
+
+/* スクロールバーのスタイリング */
+.gus-related-grid::-webkit-scrollbar {
+    width: 10px;
+}
+
+.gus-related-grid::-webkit-scrollbar-track {
+    background: #F5F5F5;
+    border-radius: 0 12px 12px 0;
+}
+
+.gus-related-grid::-webkit-scrollbar-thumb {
+    background: #CCCCCC;
+    border-radius: 0;
+    transition: background 0.2s ease;
+}
+
+.gus-related-grid::-webkit-scrollbar-thumb:hover {
+    background: #999999;
+}
+
+/* 関連補助金カード - シンプル＆見やすいデザイン */
+.gus-related-card-simple {
+    display: block;
+    background: #FFFFFF;
+    border: 2px solid #E5E5E5;
+    border-left: 4px solid #000000;
+    padding: 20px;
+    text-decoration: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
 }
 
-.gus-related-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 4px;
-    background: linear-gradient(90deg, var(--gus-gray-900) 0%, var(--gus-gray-500) 100%);
-    transform: scaleX(0);
-    transform-origin: left;
-    transition: transform 0.3s ease;
+.gus-related-card-simple:hover {
+    border-color: #000000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+    background: #FAFAFA;
 }
 
-.gus-related-card:hover::before {
-    transform: scaleX(1);
-}
-
-.gus-related-card:hover {
-    border-color: var(--gus-gray-900);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
-    transform: translateY(-4px);
-}
-
-.gus-related-card-number {
-    position: absolute;
-    top: var(--gus-space-lg);
-    right: var(--gus-space-lg);
-    width: 32px;
-    height: 32px;
-    background: var(--gus-gray-900);
-    color: var(--gus-white);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--gus-text-xs);
+/* タイトル - 大きく目立たせる */
+.gus-related-card-title {
+    font-size: 17px;
     font-weight: 800;
-}
-
-.gus-related-card h3 {
-    font-size: 1.125rem;
-    font-weight: 700;
-    margin-bottom: var(--gus-space-md);
-    line-height: 1.4;
-    padding-right: 40px;
-}
-
-.gus-related-card h3 a {
-    color: var(--gus-black);
-    text-decoration: none;
+    line-height: 1.5;
+    color: #000000;
+    margin: 0 0 16px 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     transition: color 0.2s ease;
 }
 
-.gus-related-card h3 a:hover {
-    color: var(--gus-gray-700);
+.gus-related-card-simple:hover .gus-related-card-title {
+    color: #0066cc;
 }
 
-.gus-related-card-meta {
+/* 重要情報ハイライト - 金額・地域・カテゴリを大きく */
+.gus-related-card-highlights {
     display: flex;
-    flex-direction: column;
-    gap: var(--gus-space-sm);
-    margin-bottom: var(--gus-space-lg);
-    padding: var(--gus-space-md);
-    background: var(--gus-gray-50);
-    border-radius: 8px;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
 }
 
-.gus-related-card-meta-item {
-    display: flex;
+.gus-related-highlight {
+    display: inline-flex;
     align-items: center;
-    gap: var(--gus-space-xs);
-    font-size: var(--gus-text-sm);
-    color: var(--gus-gray-700);
-}
-
-.gus-related-card-meta-label {
-    font-weight: 600;
-    color: var(--gus-gray-600);
-    min-width: 60px;
-}
-
-.gus-related-card-meta-value {
+    gap: 6px;
+    padding: 8px 14px;
+    background: #F5F5F5;
+    border-radius: 0;
+    font-size: 14px;
     font-weight: 700;
-    color: var(--gus-black);
-}
-
-.gus-related-card .gus-btn {
-    margin-top: auto;
-    font-size: var(--gus-text-sm);
-    font-weight: 700;
-    padding: 12px var(--gus-space-lg);
-    background: var(--gus-gray-900);
-    color: var(--gus-white);
-    border: 2px solid var(--gus-gray-900);
+    border-left: 3px solid;
     transition: all 0.2s ease;
 }
 
-.gus-related-card .gus-btn:hover {
-    background: var(--gus-white);
-    color: var(--gus-gray-900);
-    transform: translateX(4px);
+.gus-related-card-simple:hover .gus-related-highlight {
+    background: #FFFFFF;
+}
+
+.gus-highlight-amount {
+    border-left-color: #2196F3;
+    color: #1976D2;
+}
+
+.gus-highlight-amount svg {
+    stroke: #2196F3;
+}
+
+.gus-highlight-location {
+    border-left-color: #4CAF50;
+    color: #388E3C;
+}
+
+.gus-highlight-location svg {
+    stroke: #4CAF50;
+}
+
+.gus-highlight-category {
+    border-left-color: #FF9800;
+    color: #F57C00;
+}
+
+.gus-highlight-category svg {
+    stroke: #FF9800;
+}
+
+.gus-highlight-value {
+    font-size: 15px;
+    font-weight: 800;
+}
+
+/* マッチング情報 - 控えめに小さく */
+.gus-related-match-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    background: #F0F0F0;
+    color: #666666;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 0;
+    margin-bottom: 12px;
+}
+
+/* アクションヒント */
+.gus-related-card-action {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #F0F0F0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0066cc;
+    opacity: 0;
+    transform: translateX(-10px);
+    transition: all 0.3s ease;
+}
+
+.gus-related-card-simple:hover .gus-related-card-action {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.gus-related-card-action svg {
+    stroke: currentColor;
 }
 
 /* アイコン */
@@ -2495,8 +3033,7 @@ select {
     }
     
     .gus-related-grid {
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: var(--gus-space-lg);
+        max-height: 600px;
     }
     
     .gus-related-section-header {
@@ -2555,14 +3092,8 @@ select {
     }
     
     .gus-table-wrapper {
-        margin: 0 calc(var(--gus-space-lg) * -1);
-        padding: 0 var(--gus-space-lg);
-    }
-    
-    .gus-table th,
-    .gus-table td {
-        padding: var(--gus-space-sm) var(--gus-space-md);
-        font-size: var(--gus-text-sm);
+        margin: 0 calc(var(--gus-space-md) * -1);
+        padding: 0 var(--gus-space-md);
     }
     
     .gus-flow-step {
@@ -2571,23 +3102,36 @@ select {
     }
     
     .gus-related-grid {
-        grid-template-columns: 1fr;
-        gap: var(--gus-space-lg);
+        max-height: 500px;
     }
     
-    .gus-related-card {
-        padding: var(--gus-space-lg);
+    .gus-related-card-simple {
+        padding: 16px;
     }
     
-    .gus-related-card-number {
-        width: 28px;
-        height: 28px;
-        font-size: 0.625rem;
+    .gus-related-card-title {
+        font-size: 16px;
+        margin-bottom: 14px;
     }
     
-    .gus-related-card h3 {
-        font-size: 1rem;
-        padding-right: 36px;
+    .gus-related-card-highlights {
+        gap: 10px;
+    }
+    
+    .gus-related-highlight {
+        padding: 6px 12px;
+        font-size: 13px;
+    }
+    
+    .gus-highlight-value {
+        font-size: 14px;
+    }
+    
+    .gus-related-card-action {
+        margin-top: 10px;
+        padding-top: 10px;
+        opacity: 1;
+        transform: translateX(0);
     }
     
     .gus-social-buttons {
@@ -2655,6 +3199,53 @@ select {
         padding: 10px 14px;
         min-height: 48px;
         font-size: var(--gus-text-base);
+    }
+    
+    .gus-related-card-simple {
+        padding: 14px;
+    }
+    
+    .gus-related-card-title {
+        font-size: 15px;
+        margin-bottom: 12px;
+    }
+    
+    .gus-related-card-highlights {
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+    
+    .gus-related-highlight {
+        padding: 6px 10px;
+        font-size: 12px;
+        gap: 4px;
+    }
+    
+    .gus-related-highlight svg {
+        width: 12px;
+        height: 12px;
+        flex-shrink: 0;
+    }
+    
+    .gus-highlight-value {
+        font-size: 13px;
+    }
+    
+    .gus-related-match-badge {
+        font-size: 10px;
+        padding: 3px 8px;
+        margin-bottom: 10px;
+    }
+    
+    .gus-related-card-action {
+        font-size: 13px;
+        margin-top: 8px;
+        padding-top: 8px;
+    }
+    
+    .gus-related-card-action svg {
+        width: 14px;
+        height: 14px;
     }
     
     .gus-mobile-toc-cta {
@@ -2726,7 +3317,7 @@ select {
     background: linear-gradient(135deg, var(--gus-gray-50) 0%, var(--gus-white) 100%);
     border: none;
     border-left: 4px solid var(--gus-gray-900);
-    border-radius: 8px;
+    border-radius: 0;
     padding: var(--gus-space-2xl);
     margin-bottom: var(--gus-space-xl);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -2755,7 +3346,7 @@ select {
     align-items: center;
     justify-content: center;
     background: var(--gus-white);
-    border-radius: 12px;
+    border-radius: 0;
     flex-shrink: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
@@ -2843,14 +3434,14 @@ select {
     border-left: 4px solid var(--gus-gray-900);
     padding: var(--gus-space-lg);
     margin: var(--gus-space-lg) 0;
-    border-radius: 4px;
+    border-radius: 0;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 @media (max-width: 768px) {
     .gus-modern-section {
         padding: var(--gus-space-lg);
-        border-radius: 4px;
+        border-radius: 0;
     }
     
     .gus-modern-header {
@@ -2861,7 +3452,7 @@ select {
         font-size: 1.5rem;
         width: 48px;
         height: 48px;
-        border-radius: 8px;
+        border-radius: 0;
     }
     
     .gus-modern-title {
@@ -2886,6 +3477,469 @@ select {
     
     .gus-modern-title {
         font-size: 1rem;
+    }
+}
+
+/* ===============================================
+   IMPROVED CONTENT COLLAPSIBLE DESIGN
+   =============================================== */
+
+/* コンテンツラッパーのレスポンシブ対策 */
+.gus-content-wrapper {
+    max-width: 100%;
+    overflow-x: hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+/* 詳細情報セクション全体の幅制御 */
+.gus-details-section * {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* モバイル時の全体的な幅制御 */
+@media (max-width: 768px) {
+    .gus-single {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .gus-main {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .gus-details-section {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    
+    .gus-details-banner,
+    .gus-details-content {
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+}
+
+/* ===============================================
+   DETAILS SECTION - Prominent Banner Design
+   =============================================== */
+
+.gus-details-section {
+    background: transparent !important;
+    border: none !important;
+    border-left: none !important;
+    padding: 0 !important;
+    margin-top: var(--gus-space-2xl);
+    margin-bottom: var(--gus-space-2xl);
+}
+
+.gus-details-banner {
+    background: linear-gradient(135deg, #1a1a1a 0%, #000000 100%) !important;
+    color: #FFFFFF !important;
+    padding: 24px 28px;
+    border-radius: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: relative;
+    overflow: hidden;
+}
+
+.gus-details-banner * {
+    color: #FFFFFF !important;
+}
+
+.gus-details-banner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #FFD700 0%, #FFA500 100%);
+}
+
+.gus-details-banner-icon {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(10px);
+}
+
+.gus-details-banner-icon svg {
+    width: 24px;
+    height: 24px;
+    color: #FFD700 !important;
+    stroke: #FFD700 !important;
+}
+
+.gus-details-banner-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    line-height: 1.4;
+    color: #FFFFFF !important;
+}
+
+.gus-details-banner-subtitle {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-weight: 500;
+    margin-left: auto;
+    padding: 6px 14px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 0;
+    white-space: nowrap;
+}
+
+.gus-details-content {
+    background: #FFFFFF !important;
+    border: 2px solid #E5E5E5;
+    border-top: none;
+    border-radius: 0;
+    padding: 32px 28px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    max-width: 100%;
+    overflow-x: hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.gus-details-content,
+.gus-details-content *:not(.gus-details-banner):not(.gus-details-banner *) {
+    color: #333333 !important;
+}
+
+.gus-details-content p {
+    margin-bottom: 16px;
+    line-height: 1.8;
+    color: #333333 !important;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.gus-details-content img {
+    max-width: 100% !important;
+    height: auto !important;
+    display: block;
+    margin: 20px 0;
+    border-radius: 0;
+}
+
+.gus-details-content table {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 20px 0;
+    border-radius: 0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    background: #FFFFFF !important;
+}
+
+.gus-details-content table * {
+    color: #333333 !important;
+    background: transparent !important;
+}
+
+.gus-details-content iframe,
+.gus-details-content video,
+.gus-details-content embed {
+    max-width: 100% !important;
+    height: auto !important;
+    margin: 20px 0;
+    border-radius: 0;
+}
+
+.gus-details-content pre {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: #F5F5F5;
+    padding: 16px;
+    border-radius: 0;
+    margin: 20px 0;
+    border-left: 4px solid #000000;
+}
+
+.gus-details-content ul,
+.gus-details-content ol {
+    padding-left: 28px;
+    margin-bottom: 16px;
+    word-wrap: break-word;
+}
+
+.gus-details-content li {
+    margin-bottom: 8px;
+    line-height: 1.8;
+    color: #333333 !important;
+}
+
+.gus-details-content h1,
+.gus-details-content h2,
+.gus-details-content h3,
+.gus-details-content h4 {
+    margin-top: 28px;
+    margin-bottom: 16px;
+    font-weight: 700;
+    color: #000000 !important;
+    word-wrap: break-word;
+}
+
+.gus-details-content strong,
+.gus-details-content b {
+    color: #000000 !important;
+}
+
+.gus-details-content a {
+    color: #0066CC !important;
+    text-decoration: underline;
+}
+
+.gus-details-content span,
+.gus-details-content div,
+.gus-details-content td,
+.gus-details-content th {
+    color: #333333 !important;
+}
+
+/* Tablet Responsiveness */
+@media (max-width: 768px) {
+    .gus-details-banner {
+        padding: 18px 16px;
+        gap: 12px;
+        flex-wrap: wrap;
+        border-radius: 0;
+    }
+    
+    .gus-details-banner-icon {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .gus-details-banner-icon svg {
+        width: 20px;
+        height: 20px;
+    }
+    
+    .gus-details-banner-title {
+        font-size: 16px;
+        flex: 1 1 100%;
+        min-width: 0;
+        word-wrap: break-word;
+        line-height: 1.5;
+    }
+    
+    .gus-details-banner-subtitle {
+        font-size: 11px;
+        padding: 5px 12px;
+        flex: 1 1 100%;
+        text-align: center;
+        margin-left: 0;
+    }
+    
+    .gus-details-content {
+        padding: 20px 16px;
+        font-size: 14px;
+        border-radius: 0;
+    }
+    
+    .gus-details-content p {
+        font-size: 14px;
+        line-height: 1.8;
+    }
+    
+    .gus-details-content table {
+        font-size: 13px;
+    }
+    
+    .gus-details-content th,
+    .gus-details-content td {
+        padding: 8px !important;
+        font-size: 13px !important;
+    }
+    
+    .gus-details-content h1 {
+        font-size: 18px;
+    }
+    
+    .gus-details-content h2 {
+        font-size: 17px;
+    }
+    
+    .gus-details-content h3 {
+        font-size: 16px;
+    }
+    
+    .gus-details-content h4 {
+        font-size: 15px;
+    }
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 480px) {
+    .gus-details-banner {
+        padding: 14px 12px;
+        gap: 8px;
+        border-radius: 0;
+    }
+    
+    .gus-details-banner-icon {
+        width: 32px;
+        height: 32px;
+    }
+    
+    .gus-details-banner-icon svg {
+        width: 16px;
+        height: 16px;
+    }
+    
+    .gus-details-banner-title {
+        font-size: 14px;
+        line-height: 1.6;
+        flex: 1 1 100%;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+    
+    .gus-details-banner-subtitle {
+        font-size: 10px;
+        padding: 4px 8px;
+        flex: 1 1 100%;
+    }
+    
+    .gus-details-content {
+        padding: 16px 12px;
+        font-size: 13px;
+        border-radius: 0;
+    }
+    
+    .gus-details-content p {
+        margin-bottom: 12px;
+        line-height: 1.9;
+        font-size: 13px;
+    }
+    
+    .gus-details-content h1 {
+        font-size: 16px;
+        margin-top: 20px;
+        margin-bottom: 12px;
+    }
+    
+    .gus-details-content h2 {
+        font-size: 15px;
+        margin-top: 18px;
+        margin-bottom: 10px;
+    }
+    
+    .gus-details-content h3 {
+        font-size: 14px;
+        margin-top: 16px;
+        margin-bottom: 8px;
+    }
+    
+    .gus-details-content h4 {
+        font-size: 13px;
+        margin-top: 14px;
+        margin-bottom: 8px;
+    }
+    
+    .gus-details-content ul,
+    .gus-details-content ol {
+        padding-left: 20px;
+    }
+    
+    .gus-details-content li {
+        font-size: 13px;
+        line-height: 1.9;
+    }
+    
+    .gus-details-content table {
+        font-size: 11px;
+        display: block;
+        overflow-x: auto;
+    }
+    
+    .gus-details-content th,
+    .gus-details-content td {
+        padding: 6px !important;
+        font-size: 11px !important;
+        white-space: normal;
+        word-wrap: break-word;
+    }
+}
+
+/* Extra Small Mobile - 360px以下 */
+@media (max-width: 360px) {
+    .gus-details-banner {
+        padding: 12px 10px;
+    }
+    
+    .gus-details-banner-icon {
+        width: 28px;
+        height: 28px;
+    }
+    
+    .gus-details-banner-icon svg {
+        width: 14px;
+        height: 14px;
+    }
+    
+    .gus-details-banner-title {
+        font-size: 13px;
+        line-height: 1.7;
+    }
+    
+    .gus-details-banner-subtitle {
+        font-size: 9px;
+        padding: 3px 6px;
+    }
+    
+    .gus-details-content {
+        padding: 14px 10px;
+        font-size: 12px;
+    }
+    
+    .gus-details-content p {
+        font-size: 12px;
+        line-height: 2;
+    }
+    
+    .gus-details-content h1 {
+        font-size: 14px;
+    }
+    
+    .gus-details-content h2 {
+        font-size: 13px;
+    }
+    
+    .gus-details-content h3 {
+        font-size: 12px;
+    }
+    
+    .gus-details-content h4 {
+        font-size: 12px;
+    }
+    
+    .gus-details-content table {
+        font-size: 10px;
+    }
+    
+    .gus-details-content th,
+    .gus-details-content td {
+        padding: 5px !important;
+        font-size: 10px !important;
     }
 }
 
@@ -2958,7 +4012,7 @@ select {
     width: 72px;
     height: 72px;
     background: rgba(255, 215, 0, 0.1);
-    border-radius: 50%;
+    border-radius: 0;
     margin-bottom: var(--gus-space-lg);
     color: #FFD700;
 }
@@ -3003,7 +4057,7 @@ select {
     font-size: 1rem;
     font-weight: 600;
     text-decoration: none;
-    border-radius: 8px;
+    border-radius: 0;
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
@@ -3194,11 +4248,100 @@ select {
     }
 }
 
+/* ===============================================
+   PAGINATION STYLES
+   =============================================== */
+
+.gus-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: var(--gus-space-2xl) 0;
+    padding: var(--gus-space-xl) 0;
+    border-top: 2px solid var(--gus-gray-300);
+    border-bottom: 2px solid var(--gus-gray-300);
+}
+
+.gus-pagination-info {
+    font-size: var(--gus-text-sm);
+    color: var(--gus-gray-600);
+    font-weight: 600;
+    margin: 0 var(--gus-space-md);
+}
+
+.gus-pagination-btn,
+.gus-pagination-page {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    height: 44px;
+    padding: 0 var(--gus-space-md);
+    background: var(--gus-white);
+    color: var(--gus-gray-800);
+    border: 2px solid var(--gus-gray-300);
+    border-radius: 0;
+    font-size: var(--gus-text-sm);
+    font-weight: 700;
+    text-decoration: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+}
+
+.gus-pagination-btn:hover:not(:disabled),
+.gus-pagination-page:hover {
+    background: var(--gus-gray-900);
+    color: var(--gus-white);
+    border-color: var(--gus-gray-900);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.gus-pagination-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.gus-pagination-page.active {
+    background: var(--gus-gray-900);
+    color: var(--gus-white);
+    border-color: var(--gus-gray-900);
+}
+
+.gus-pagination-numbers {
+    display: flex;
+    gap: 6px;
+}
+
+@media (max-width: 768px) {
+    .gus-pagination {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .gus-pagination-info {
+        width: 100%;
+        text-align: center;
+        margin-bottom: var(--gus-space-sm);
+    }
+    
+    .gus-pagination-btn,
+    .gus-pagination-page {
+        min-width: 40px;
+        height: 40px;
+        font-size: 0.75rem;
+    }
+}
+
 /* Reduced Motion Support */
 @media (prefers-reduced-motion: reduce) {
     .gus-cta-btn,
     .gus-cta-btn svg,
-    .gus-cta-btn::before {
+    .gus-cta-btn::before,
+    .gus-pagination-btn,
+    .gus-pagination-page {
         transition: none;
     }
     
@@ -3283,8 +4426,6 @@ select {
                     </time>
                 </div>
                 
-                <h1 class="gus-title" itemprop="headline"><?php the_title(); ?></h1>
-                
                 <meta itemprop="dateModified" content="<?php echo $modified_date; ?>">
                 <meta itemprop="author" content="<?php echo esc_attr(get_bloginfo('name')); ?>">
                 <meta itemprop="image" content="<?php echo esc_url($og_image); ?>">
@@ -3303,36 +4444,29 @@ select {
             </section>
             <?php endif; ?>
             
-            <!-- 詳細情報 -->
-            <section id="details" class="gus-section" itemprop="articleBody">
-                <header class="gus-section-header">
-                    <div class="gus-icon gus-icon-document gus-section-icon"></div>
-                    <h2 class="gus-section-title">詳細情報</h2>
-                </header>
-                <div class="gus-section-content gus-content-wrapper">
-                    <?php the_content(); ?>
-                </div>
-            </section>
-            
-            <!-- 補助金詳細 -->
+            <!-- 補助金詳細（統合版）with Title - MOVED TO TOP POSITION -->
             <section id="grant-details" class="gus-section">
-                <header class="gus-section-header">
-                    <div class="gus-icon gus-icon-document gus-section-icon"></div>
-                    <h2 class="gus-section-title">補助金詳細</h2>
-                </header>
                 <div class="gus-section-content">
                     <div class="gus-table-wrapper">
-                        <table class="gus-table">
+                        <table class="gus-table gus-table-comprehensive gus-table-with-title">
+                            <thead>
+                                <tr class="gus-table-title-row">
+                                    <th colspan="2" class="gus-table-title-cell">
+                                        <h1 itemprop="headline"><?php the_title(); ?></h1>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
                             <?php if ($formatted_amount): ?>
                             <tr>
                                 <th>補助金額</th>
-                                <td><strong style="font-size: var(--gus-text-lg);">最大 <?php echo esc_html($formatted_amount); ?></strong></td>
+                                <td><strong style="font-size: var(--gus-text-lg); color: var(--gus-black);">最大 <?php echo esc_html($formatted_amount); ?></strong></td>
                             </tr>
                             <?php endif; ?>
                             
                             <?php if ($grant_data['organization']): ?>
                             <tr>
-                                <th>主催</th>
+                                <th>主催機関</th>
                                 <td><?php echo esc_html($grant_data['organization']); ?></td>
                             </tr>
                             <?php endif; ?>
@@ -3340,7 +4474,11 @@ select {
                             <?php if ($deadline_info): ?>
                             <tr>
                                 <th>申請締切</th>
-                                <td><?php echo esc_html($deadline_info); ?></td>
+                                <td>
+                                    <strong style="<?php echo $deadline_class === 'urgent' ? 'color: #DC2626;' : ($deadline_class === 'warning' ? 'color: #F59E0B;' : ''); ?>">
+                                        <?php echo esc_html($deadline_info); ?>
+                                    </strong>
+                                </td>
                             </tr>
                             <?php endif; ?>
                             
@@ -3361,7 +4499,78 @@ select {
                             <?php if ($grant_data['subsidy_rate_detailed']): ?>
                             <tr>
                                 <th>補助率詳細</th>
-                                <td><?php echo esc_html($grant_data['subsidy_rate_detailed']); ?></td>
+                                <td><?php echo wp_kses_post(nl2br($grant_data['subsidy_rate_detailed'])); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php if ($grant_data['grant_target']): ?>
+                            <tr>
+                                <th>対象者・対象事業</th>
+                                <td><?php echo wp_kses_post($grant_data['grant_target']); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php 
+                            $documents_content = !empty($grant_data['required_documents_detailed']) 
+                                ? $grant_data['required_documents_detailed'] 
+                                : $grant_data['required_documents'];
+                            if ($documents_content): 
+                            ?>
+                            <tr>
+                                <th>必要書類</th>
+                                <td><?php echo wp_kses_post($documents_content); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php 
+                            $expenses_content = !empty($grant_data['eligible_expenses_detailed']) 
+                                ? $grant_data['eligible_expenses_detailed'] 
+                                : $grant_data['eligible_expenses'];
+                            if ($expenses_content): 
+                            ?>
+                            <tr>
+                                <th>対象経費</th>
+                                <td><?php echo wp_kses_post($expenses_content); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php if ($grant_data['application_method']): ?>
+                            <tr>
+                                <th>申請方法</th>
+                                <td>
+                                    <?php 
+                                    $method_labels = array(
+                                        'online' => 'オンライン申請',
+                                        'mail' => '郵送申請',
+                                        'visit' => '窓口申請',
+                                        'mixed' => 'オンライン・郵送併用'
+                                    );
+                                    echo isset($method_labels[$grant_data['application_method']]) 
+                                        ? $method_labels[$grant_data['application_method']] 
+                                        : esc_html($grant_data['application_method']);
+                                    ?>
+                                </td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php if ($grant_data['area_notes']): ?>
+                            <tr>
+                                <th>地域に関する備考</th>
+                                <td><?php echo wp_kses_post(nl2br($grant_data['area_notes'])); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php if ($prefecture_display): ?>
+                            <tr>
+                                <th>対象地域</th>
+                                <td><?php echo esc_html($prefecture_display); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            
+                            <?php if ($municipality_display): ?>
+                            <tr>
+                                <th>対象市町村</th>
+                                <td><?php echo esc_html($municipality_display); ?></td>
                             </tr>
                             <?php endif; ?>
                             
@@ -3386,7 +4595,7 @@ select {
                             <?php if ($grant_data['adoption_rate'] > 0): ?>
                             <tr>
                                 <th>採択率</th>
-                                <td><?php echo number_format($grant_data['adoption_rate'], 1); ?>%</td>
+                                <td><strong><?php echo number_format($grant_data['adoption_rate'], 1); ?>%</strong></td>
                             </tr>
                             <?php endif; ?>
                             
@@ -3394,115 +4603,160 @@ select {
                                 <th>閲覧数</th>
                                 <td><?php echo number_format($grant_data['views_count']); ?> 回</td>
                             </tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
             </section>
             
-            <!-- 対象者・対象事業 -->
-            <?php if ($grant_data['grant_target']): ?>
-            <section id="target" class="gus-section gus-modern-section">
-                <header class="gus-modern-header">
-                    <div class="gus-modern-icon">■</div>
-                    <h2 class="gus-modern-title">対象者・対象事業</h2>
+            <!-- 関連する補助金 - MOVED TO POSITION 2 (after Grant Details) -->
+            <?php if (!empty($scored_related_grants) && count($scored_related_grants) > 0): ?>
+            <section id="related" class="gus-related-section">
+                <header class="gus-related-section-header">
+                    <div class="gus-related-section-icon">■</div>
+                    <div style="flex: 1;">
+                        <h2 class="gus-related-section-title">あなたにおすすめの補助金</h2>
+                        <p style="font-size: var(--gus-text-sm); color: var(--gus-gray-600); margin: 8px 0 0 0; font-weight: 500;">
+                            同じ市町村・都道府県・カテゴリ・タグの補助金を優先的に表示しています（<?php echo count($scored_related_grants); ?>件）
+                        </p>
+                    </div>
                 </header>
-                <div class="gus-modern-content">
-                    <?php echo wp_kses_post($grant_data['grant_target']); ?>
+                <div class="gus-related-grid">
+                    <?php 
+                    $related_count = 0;
+                    $display_limit = 9; // 表示件数を9件に制限
+                    foreach ($scored_related_grants as $related_grant) : 
+                        if ($related_count >= $display_limit) break;
+                        $related_count++;
+                        
+                        $related_post_id = $related_grant['id'];
+                        $related_score = $related_grant['score'];
+                        $related_match_details = $related_grant['match_details'];
+                        
+                        // 関連補助金の情報を取得
+                        $related_post = get_post($related_post_id);
+                        if (!$related_post) continue;
+                        
+                        // 補助金データを取得
+                        $related_max_amount = function_exists('get_field') ? get_field('max_amount', $related_post_id) : '';
+                        $related_deadline = function_exists('get_field') ? get_field('deadline', $related_post_id) : '';
+                        $related_organization = function_exists('get_field') ? get_field('organization', $related_post_id) : '';
+                        $related_status = function_exists('get_field') ? get_field('application_status', $related_post_id) : 'open';
+                        
+                        // タクソノミー取得
+                        $related_prefs = wp_get_post_terms($related_post_id, 'grant_prefecture');
+                        $related_cats = wp_get_post_terms($related_post_id, 'grant_category');
+                        
+                        $related_pref_display = '';
+                        if (!empty($related_prefs)) {
+                            if (count($related_prefs) >= 47 || in_array('zenkoku', wp_list_pluck($related_prefs, 'slug'))) {
+                                $related_pref_display = '全国';
+                            } else {
+                                $related_pref_display = $related_prefs[0]->name;
+                                if (count($related_prefs) > 1) {
+                                    $related_pref_display .= ' 他' . (count($related_prefs) - 1) . '地域';
+                                }
+                            }
+                        }
+                    ?>
+                    <a href="<?php echo esc_url(get_permalink($related_post_id)); ?>" class="gus-related-card-simple">
+                        
+                        <!-- タイトル -->
+                        <h3 class="gus-related-card-title">
+                            <?php echo esc_html(get_the_title($related_post_id)); ?>
+                        </h3>
+                        
+                        <!-- 重要情報（金額・地域・カテゴリ）を大きく表示 -->
+                        <div class="gus-related-card-highlights">
+                            <?php if ($related_max_amount): ?>
+                            <div class="gus-related-highlight gus-highlight-amount">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <line x1="12" y1="1" x2="12" y2="23"/>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                                </svg>
+                                <span class="gus-highlight-value"><?php echo esc_html($related_max_amount); ?></span>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <?php if ($related_pref_display): ?>
+                            <div class="gus-related-highlight gus-highlight-location">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                                    <circle cx="12" cy="10" r="3"/>
+                                </svg>
+                                <span class="gus-highlight-value"><?php echo esc_html($related_pref_display); ?></span>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($related_cats)): ?>
+                            <div class="gus-related-highlight gus-highlight-category">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                </svg>
+                                <span class="gus-highlight-value"><?php echo esc_html($related_cats[0]->name); ?></span>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                        
+                        <!-- 控えめなマッチング情報（小さく） -->
+                        <?php if ($related_match_details): ?>
+                        <div class="gus-related-match-badge">
+                            <?php echo esc_html($related_match_details); ?>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <!-- アクションヒント -->
+                        <div class="gus-related-card-action">
+                            <span>詳しく見る</span>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </div>
+                        
+                    </a>
+                    <?php endforeach; ?>
                 </div>
+                
+                <?php if (count($scored_related_grants) > $display_limit): ?>
+                <div style="text-align: center; margin-top: var(--gus-space-2xl);">
+                    <a href="<?php echo home_url('/grants/'); ?>" 
+                       class="gus-btn gus-btn-secondary"
+                       style="display: inline-flex; align-items: center; gap: 8px; width: auto; min-width: 240px;">
+                        さらに補助金を探す (残り<?php echo count($scored_related_grants) - $display_limit; ?>件)
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </a>
+                </div>
+                <?php endif; ?>
             </section>
             <?php endif; ?>
             
-            <!-- 必要書類 -->
-            <?php 
-            // 詳細版がある場合は詳細版を優先表示
-            $documents_content = !empty($grant_data['required_documents_detailed']) 
-                ? $grant_data['required_documents_detailed'] 
-                : $grant_data['required_documents'];
-            
-            if ($documents_content): 
-            ?>
-            <section id="documents" class="gus-section gus-modern-section">
-                <header class="gus-modern-header">
-                    <div class="gus-modern-icon">■</div>
-                    <h2 class="gus-modern-title">必要書類</h2>
-                </header>
-                <div class="gus-modern-content">
-                    <?php echo wp_kses_post($documents_content); ?>
+            <!-- 詳細情報 - Always visible with prominent banner -->
+            <section id="details" class="gus-section gus-details-section" itemprop="articleBody">
+                <div class="gus-details-banner">
+                    <div class="gus-details-banner-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                    </div>
+                    <h2 class="gus-details-banner-title">この補助金の詳細情報</h2>
+                    <div class="gus-details-banner-subtitle">申請前に必ずご確認ください</div>
+                </div>
+                <div class="gus-details-content">
+                    <?php
+                    // Get the full content and display it completely
+                    $full_content = get_the_content();
+                    $full_content = apply_filters('the_content', $full_content);
+                    echo $full_content;
+                    ?>
                 </div>
             </section>
-            <?php endif; ?>
-            
-            <!-- 対象経費 -->
-            <?php 
-            // 詳細版がある場合は詳細版を優先表示
-            $expenses_content = !empty($grant_data['eligible_expenses_detailed']) 
-                ? $grant_data['eligible_expenses_detailed'] 
-                : $grant_data['eligible_expenses'];
-            
-            if ($expenses_content): 
-            ?>
-            <section id="expenses" class="gus-section gus-modern-section">
-                <header class="gus-modern-header">
-                    <div class="gus-modern-icon">■</div>
-                    <h2 class="gus-modern-title">対象経費</h2>
-                </header>
-                <div class="gus-modern-content">
-                    <?php echo wp_kses_post($expenses_content); ?>
-                </div>
-            </section>
-            <?php endif; ?>
-            
-            <!-- 補助率・補助額 -->
-            <?php if ($grant_data['subsidy_rate_detailed']): ?>
-            <section id="subsidy-rate" class="gus-section gus-modern-section">
-                <header class="gus-modern-header">
-                    <div class="gus-modern-icon">■</div>
-                    <h2 class="gus-modern-title">補助率・補助額</h2>
-                </header>
-                <div class="gus-modern-content">
-                    <?php echo wp_kses_post($grant_data['subsidy_rate_detailed']); ?>
-                </div>
-            </section>
-            <?php endif; ?>
-            
-            <!-- 申請方法 -->
-            <?php if ($grant_data['application_method']): ?>
-            <section id="application-method" class="gus-section gus-modern-section">
-                <header class="gus-modern-header">
-                    <div class="gus-modern-icon">■</div>
-                    <h2 class="gus-modern-title">申請方法</h2>
-                </header>
-                <div class="gus-modern-content">
-                    <p>
-                        <?php 
-                        $method_labels = array(
-                            'online' => 'オンライン申請',
-                            'mail' => '郵送申請',
-                            'visit' => '窓口申請',
-                            'mixed' => 'オンライン・郵送併用'
-                        );
-                        echo isset($method_labels[$grant_data['application_method']]) 
-                            ? $method_labels[$grant_data['application_method']] 
-                            : esc_html($grant_data['application_method']);
-                        ?>
-                    </p>
-                </div>
-            </section>
-            <?php endif; ?>
-            
-            <!-- 地域制限に関する備考 -->
-            <?php if ($grant_data['area_notes']): ?>
-            <section id="area-notes" class="gus-section gus-modern-section">
-                <header class="gus-modern-header">
-                    <div class="gus-modern-icon">■</div>
-                    <h2 class="gus-modern-title">地域に関する備考</h2>
-                </header>
-                <div class="gus-modern-content">
-                    <?php echo wp_kses_post(nl2br($grant_data['area_notes'])); ?>
-                </div>
-            </section>
-            <?php endif; ?>
-            
+
             <!-- 申請の流れ -->
             <section id="application-flow" class="gus-section">
                 <header class="gus-section-header">
@@ -3660,21 +4914,19 @@ select {
                         $thumbnail_url = get_the_post_thumbnail_url($column_id, 'medium');
                         $excerpt = get_the_excerpt();
                     ?>
-                    <article class="gus-related-column-card">
+                    <a href="<?php the_permalink(); ?>" class="gus-related-column-card" aria-label="<?php echo esc_attr(get_the_title() . 'を読む'); ?>">
                         <?php if ($thumbnail_url): ?>
                         <div class="gus-related-column-thumbnail">
-                            <a href="<?php the_permalink(); ?>" aria-label="<?php echo esc_attr(get_the_title() . 'を読む'); ?>">
-                                <img src="<?php echo esc_url($thumbnail_url); ?>" 
-                                     alt="<?php echo esc_attr(get_the_title()); ?>"
-                                     loading="lazy">
-                            </a>
+                            <img src="<?php echo esc_url($thumbnail_url); ?>" 
+                                 alt="<?php echo esc_attr(get_the_title()); ?>"
+                                 loading="lazy">
                         </div>
                         <?php endif; ?>
                         <div class="gus-related-column-card-content">
                             <div class="gus-related-column-card-meta">
                                 <?php if ($column_categories && !is_wp_error($column_categories)): ?>
                                 <span class="gus-related-column-category">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                                     </svg>
                                     <?php echo esc_html($column_categories[0]->name); ?>
@@ -3682,7 +4934,7 @@ select {
                                 <?php endif; ?>
                                 <?php if ($read_time): ?>
                                 <span class="gus-related-column-read-time">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                         <circle cx="12" cy="12" r="10"/>
                                         <polyline points="12 6 12 12 16 14"/>
                                     </svg>
@@ -3691,25 +4943,15 @@ select {
                                 <?php endif; ?>
                             </div>
                             <h3 class="gus-related-column-card-title">
-                                <a href="<?php the_permalink(); ?>" aria-label="<?php echo esc_attr(get_the_title() . 'を読む'); ?>">
-                                    <?php the_title(); ?>
-                                </a>
+                                <?php the_title(); ?>
                             </h3>
                             <?php if ($excerpt): ?>
                             <p class="gus-related-column-card-excerpt">
-                                <?php echo wp_trim_words($excerpt, 20, '...'); ?>
+                                <?php echo wp_trim_words($excerpt, 15, '...'); ?>
                             </p>
                             <?php endif; ?>
-                            <a href="<?php the_permalink(); ?>" 
-                               class="gus-related-column-card-link"
-                               aria-label="<?php echo esc_attr(get_the_title() . 'の記事を読む'); ?>">
-                                記事を読む
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                    <polyline points="9 18 15 12 9 6"/>
-                                </svg>
-                            </a>
                         </div>
-                    </article>
+                    </a>
                     <?php endwhile; ?>
                 </div>
                 <div class="gus-related-columns-footer">
@@ -3772,68 +5014,6 @@ select {
                 </div>
             </div>
             
-            <!-- 関連する補助金 - スタイリッシュ版 -->
-            <?php if ($related_query->have_posts()): ?>
-            <section id="related" class="gus-related-section">
-                <header class="gus-related-section-header">
-                    <div class="gus-related-section-icon">■</div>
-                    <h2 class="gus-related-section-title">関連する補助金</h2>
-                </header>
-                <div class="gus-related-grid">
-                    <?php 
-                    $related_query->rewind_posts();
-                    $related_count = 0;
-                    while ($related_query->have_posts()) : 
-                        $related_query->the_post();
-                        $related_count++;
-                    ?>
-                    <article class="gus-related-card">
-                        <div class="gus-related-card-number"><?php echo $related_count; ?></div>
-                        <h3>
-                            <a href="<?php the_permalink(); ?>" aria-label="<?php echo esc_attr(get_the_title() . 'の詳細を見る'); ?>">
-                                <?php the_title(); ?>
-                            </a>
-                        </h3>
-                        <?php
-                        $related_max_amount = function_exists('get_field') ? get_field('max_amount', get_the_ID()) : '';
-                        $related_deadline = function_exists('get_field') ? get_field('deadline', get_the_ID()) : '';
-                        $related_org = function_exists('get_field') ? get_field('organization', get_the_ID()) : '';
-                        ?>
-                        <div class="gus-related-card-meta">
-                            <?php if ($related_max_amount): ?>
-                            <div class="gus-related-card-meta-item">
-                                <span class="gus-related-card-meta-label">■ 金額</span>
-                                <span class="gus-related-card-meta-value"><?php echo esc_html($related_max_amount); ?></span>
-                            </div>
-                            <?php endif; ?>
-                            <?php if ($related_deadline): ?>
-                            <div class="gus-related-card-meta-item">
-                                <span class="gus-related-card-meta-label">■ 締切</span>
-                                <span class="gus-related-card-meta-value"><?php echo esc_html($related_deadline); ?></span>
-                            </div>
-                            <?php endif; ?>
-                            <?php if ($related_org): ?>
-                            <div class="gus-related-card-meta-item">
-                                <span class="gus-related-card-meta-label">■ 主催</span>
-                                <span class="gus-related-card-meta-value"><?php echo esc_html(wp_trim_words($related_org, 5, '...')); ?></span>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-                        <a href="<?php the_permalink(); ?>" 
-                           class="gus-btn gus-btn-primary" 
-                           aria-label="<?php echo esc_attr(get_the_title() . 'の詳細ページへ'); ?>">
-                            詳細を見る →
-                        </a>
-                    </article>
-                    <?php endwhile; ?>
-                </div>
-            </section>
-            <?php 
-            wp_reset_postdata();
-            endif; 
-            ?>
-            
-
             <!-- PC/モバイル共通 強力なCTAセクション -->
             <section class="gus-cta-section" style="margin-top: var(--gus-space-2xl); margin-bottom: var(--gus-space-2xl);">
                 <div class="gus-cta-container">
@@ -4040,7 +5220,72 @@ select {
                 </div>
             </div>
             
-            <!-- ✅ 2. 目次（ページ内情報構造を把握） -->
+            <!-- ✅ 2. AIチャット（サポートツールとして配置） - 統計情報の直後 -->
+            <div class="gus-pc-ai-permanent">
+                <div class="gus-pc-ai-permanent-header">
+                    <div class="gus-pc-ai-permanent-title">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            <circle cx="9" cy="10" r="1" fill="currentColor"/>
+                            <circle cx="15" cy="10" r="1" fill="currentColor"/>
+                        </svg>
+                        <span>AI助成金アシスタント</span>
+                    </div>
+                    <div class="gus-pc-ai-permanent-subtitle"><?php echo esc_html(wp_trim_words(get_the_title(), 10, '...')); ?></div>
+                </div>
+                
+                <div class="gus-pc-ai-permanent-messages" id="pcPermanentMessages" role="log" aria-live="polite" aria-atomic="false">
+                    <!-- 初期ウェルカムメッセージ -->
+                    <div class="gus-ai-message gus-ai-message--assistant">
+                        <div class="gus-ai-message-avatar" aria-hidden="true">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v20M2 12h20"/>
+                            </svg>
+                        </div>
+                        <div class="gus-ai-message-content">
+                            こんにちは！この助成金について何でもお聞きください。<br>
+                            申請条件、必要書類、申請方法、対象経費など、詳しくお答えします。
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="gus-pc-ai-permanent-input-container">
+                    <div class="gus-pc-ai-permanent-input-wrapper">
+                        <textarea 
+                            class="gus-pc-ai-permanent-input" 
+                            id="pcPermanentInput"
+                            placeholder="例：申請条件は何ですか？"
+                            rows="2"
+                            aria-label="質問を入力してください"></textarea>
+                        <button 
+                            class="gus-pc-ai-permanent-send" 
+                            id="pcPermanentSend"
+                            type="button"
+                            aria-label="質問を送信">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <line x1="22" y1="2" x2="11" y2="13"/>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="gus-pc-ai-permanent-suggestions" role="group" aria-label="質問の候補">
+                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="申請条件を詳しく教えてください">
+                            申請条件は？
+                        </button>
+                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="必要な書類を教えてください">
+                            必要書類は？
+                        </button>
+                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="どんな費用が対象になりますか？">
+                            対象経費は？
+                        </button>
+                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="申請方法を教えてください">
+                            申請方法は？
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ✅ 3. 目次（ページ内情報構造を把握） -->
             <nav class="gus-sidebar-card" aria-label="目次">
                 <h2 class="gus-sidebar-title">
                     <span class="gus-icon gus-icon-list"></span>
@@ -4058,76 +5303,62 @@ select {
                     <li class="gus-toc-item">
                         <a href="#grant-details" class="gus-toc-link">補助金詳細</a>
                     </li>
-                    <?php if ($grant_data['grant_target']): ?>
-                    <li class="gus-toc-item">
-                        <a href="#target" class="gus-toc-link">対象者・対象事業</a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($grant_data['required_documents'] || $grant_data['required_documents_detailed']): ?>
-                    <li class="gus-toc-item">
-                        <a href="#documents" class="gus-toc-link">必要書類</a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($grant_data['eligible_expenses'] || $grant_data['eligible_expenses_detailed']): ?>
-                    <li class="gus-toc-item">
-                        <a href="#expenses" class="gus-toc-link">対象経費</a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($grant_data['subsidy_rate_detailed']): ?>
-                    <li class="gus-toc-item">
-                        <a href="#subsidy-rate" class="gus-toc-link">補助率・補助額</a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($grant_data['application_method']): ?>
-                    <li class="gus-toc-item">
-                        <a href="#application-method" class="gus-toc-link">申請方法</a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($grant_data['area_notes']): ?>
-                    <li class="gus-toc-item">
-                        <a href="#area-notes" class="gus-toc-link">地域に関する備考</a>
-                    </li>
-                    <?php endif; ?>
                     <li class="gus-toc-item">
                         <a href="#application-flow" class="gus-toc-link">申請の流れ</a>
                     </li>
                     <li class="gus-toc-item">
                         <a href="#faq" class="gus-toc-link">よくある質問</a>
                     </li>
+                    <?php if ($related_columns_query && $related_columns_query->have_posts()): ?>
+                    <li class="gus-toc-item">
+                        <a href="#related-columns" class="gus-toc-link">詳しい記事</a>
+                    </li>
+                    <?php endif; ?>
                     <?php if ($grant_data['contact_info']): ?>
                     <li class="gus-toc-item">
                         <a href="#contact" class="gus-toc-link">お問い合わせ</a>
                     </li>
                     <?php endif; ?>
                     <li class="gus-toc-item">
-                        <a href="#related" class="gus-toc-link">関連する補助金</a>
+                        <a href="#related" class="gus-toc-link">おすすめ補助金</a>
                     </li>
                 </ul>
             </nav>
             
-            <!-- ✅ 3. 関連補助金（代替案を素早く提示） -->
-            <?php if ($related_query->have_posts()): ?>
+            <!-- ✅ 4. おすすめ補助金（代替案を素早く提示） -->
+            <?php if (!empty($scored_related_grants) && count($scored_related_grants) > 0): ?>
             <div class="gus-sidebar-card">
                 <h2 class="gus-sidebar-title">
                     <span class="gus-icon gus-icon-document"></span>
-                    関連補助金
+                    おすすめ補助金
                 </h2>
                 <div class="gus-related-mini">
                     <?php 
-                    $related_query->rewind_posts();
-                    $count = 0;
-                    while ($related_query->have_posts() && $count < 4) : 
-                        $related_query->the_post();
-                        $count++;
+                    $sidebar_count = 0;
+                    foreach ($scored_related_grants as $related_grant) : 
+                        if ($sidebar_count >= 4) break;
+                        $sidebar_count++;
+                        
+                        $sidebar_related_id = $related_grant['id'];
+                        $sidebar_match_display = $related_grant['match_details'];
+                        $sidebar_score = $related_grant['score'];
                     ?>
-                    <a href="<?php the_permalink(); ?>" 
+                    <a href="<?php echo esc_url(get_permalink($sidebar_related_id)); ?>" 
                        class="gus-related-mini-item"
-                       aria-label="<?php echo esc_attr(get_the_title() . 'の詳細を見る'); ?>">
+                       aria-label="<?php echo esc_attr(get_the_title($sidebar_related_id) . 'の詳細を見る'); ?>">
+                        <?php if ($sidebar_match_display): ?>
+                        <div style="font-size: 10px; color: #666; margin-bottom: 4px; font-weight: 600; line-height: 1.4;">
+                            <?php echo esc_html($sidebar_match_display); ?>
+                            <?php if ($sidebar_score > 0): ?>
+                            <span style="color: #999; font-size: 9px;">(関連度: <?php echo $sidebar_score; ?>)</span>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
                         <div class="gus-related-mini-title">
-                            <?php echo wp_trim_words(get_the_title(), 10, '...'); ?>
+                            <?php echo wp_trim_words(get_the_title($sidebar_related_id), 10, '...'); ?>
                         </div>
                         <?php
-                        $related_amount = function_exists('get_field') ? get_field('max_amount', get_the_ID()) : '';
+                        $related_amount = function_exists('get_field') ? get_field('max_amount', $sidebar_related_id) : '';
                         if ($related_amount):
                         ?>
                         <div class="gus-related-mini-meta">
@@ -4135,15 +5366,19 @@ select {
                         </div>
                         <?php endif; ?>
                     </a>
-                    <?php endwhile; ?>
+                    <?php endforeach; ?>
                 </div>
+                <a href="#related" 
+                   class="gus-view-all-link" 
+                   style="display: block; text-align: center; margin-top: 12px;"
+                   onclick="event.preventDefault(); document.getElementById('related').scrollIntoView({behavior: 'smooth'});">
+                    すべて見る (<?php echo count($scored_related_grants); ?>件)
+                    <i class="fas fa-arrow-down" aria-hidden="true"></i>
+                </a>
             </div>
-            <?php 
-            wp_reset_postdata();
-            endif; 
-            ?>
+            <?php endif; ?>
             
-            <!-- ✅ 4. 関連コラム（詳しい情報へ誘導） -->
+            <!-- ✅ 5. 関連コラム（詳しい情報へ誘導） -->
             <?php if ($related_columns_query && $related_columns_query->have_posts()): ?>
             <div class="gus-sidebar-card">
                 <h2 class="gus-sidebar-title">
@@ -4248,73 +5483,8 @@ select {
                 </div>
             </div>
             
-            <!-- ✅ 6. AIチャット（サポートツールとして配置） -->
-            <div class="gus-pc-ai-permanent">
-                <div class="gus-pc-ai-permanent-header">
-                    <div class="gus-pc-ai-permanent-title">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                            <circle cx="9" cy="10" r="1" fill="currentColor"/>
-                            <circle cx="15" cy="10" r="1" fill="currentColor"/>
-                        </svg>
-                        <span>AI助成金アシスタント</span>
-                    </div>
-                    <div class="gus-pc-ai-permanent-subtitle"><?php echo esc_html(wp_trim_words(get_the_title(), 10, '...')); ?></div>
-                </div>
-                
-                <div class="gus-pc-ai-permanent-messages" id="pcPermanentMessages" role="log" aria-live="polite" aria-atomic="false">
-                    <!-- 初期ウェルカムメッセージ -->
-                    <div class="gus-ai-message gus-ai-message--assistant">
-                        <div class="gus-ai-message-avatar" aria-hidden="true">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M12 2v20M2 12h20"/>
-                            </svg>
-                        </div>
-                        <div class="gus-ai-message-content">
-                            こんにちは！この助成金について何でもお聞きください。<br>
-                            申請条件、必要書類、申請方法、対象経費など、詳しくお答えします。
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="gus-pc-ai-permanent-input-container">
-                    <div class="gus-pc-ai-permanent-input-wrapper">
-                        <textarea 
-                            class="gus-pc-ai-permanent-input" 
-                            id="pcPermanentInput"
-                            placeholder="例：申請条件は何ですか？"
-                            rows="2"
-                            aria-label="質問を入力してください"></textarea>
-                        <button 
-                            class="gus-pc-ai-permanent-send" 
-                            id="pcPermanentSend"
-                            type="button"
-                            aria-label="質問を送信">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <line x1="22" y1="2" x2="11" y2="13"/>
-                                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="gus-pc-ai-permanent-suggestions" role="group" aria-label="質問の候補">
-                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="申請条件を詳しく教えてください">
-                            申請条件は？
-                        </button>
-                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="必要な書類を教えてください">
-                            必要書類は？
-                        </button>
-                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="どんな費用が対象になりますか？">
-                            対象経費は？
-                        </button>
-                        <button class="gus-pc-ai-permanent-suggestion" type="button" data-question="申請方法を教えてください">
-                            申請方法は？
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- ✅ 7. タグ（SEO最適化：表示件数制限） -->
-            <?php if ($taxonomies['categories'] || $taxonomies['prefectures'] || $taxonomies['municipalities'] || $taxonomies['tags']): ?>
+            <!-- ✅ 6. タグ（SEO最適化：表示件数制限） -->
+            <?php if ($taxonomies['categories'] || $taxonomies['tags']): ?>
             <div class="gus-sidebar-card">
                 <h2 class="gus-sidebar-title">
                     <span class="gus-icon gus-icon-tag"></span>
@@ -4341,58 +5511,6 @@ select {
                         <?php if (count($taxonomies['categories']) > $max_categories): ?>
                         <span class="gus-tag-more" style="font-size: 11px; color: #666;">
                             +<?php echo count($taxonomies['categories']) - $max_categories; ?>件
-                        </span>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <?php endif; ?>
-                
-                <?php if ($taxonomies['prefectures']): ?>
-                <div class="gus-tags-section">
-                    <div class="gus-tags-label">都道府県</div>
-                    <div class="gus-tags">
-                        <?php 
-                        $prefecture_count = 0;
-                        $max_prefectures = 3; // SEO最適化：最大3個まで表示
-                        foreach ($taxonomies['prefectures'] as $pref): 
-                            if ($prefecture_count >= $max_prefectures) break;
-                            $prefecture_count++;
-                        ?>
-                        <a href="<?php echo get_term_link($pref); ?>" 
-                           class="gus-tag"
-                           aria-label="<?php echo esc_attr($pref->name . 'の補助金一覧'); ?>">
-                            <?php echo esc_html($pref->name); ?>
-                        </a>
-                        <?php endforeach; ?>
-                        <?php if (count($taxonomies['prefectures']) > $max_prefectures): ?>
-                        <span class="gus-tag-more" style="font-size: 11px; color: #666;">
-                            +<?php echo count($taxonomies['prefectures']) - $max_prefectures; ?>件
-                        </span>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <?php endif; ?>
-                
-                <?php if ($taxonomies['municipalities']): ?>
-                <div class="gus-tags-section">
-                    <div class="gus-tags-label">市町村</div>
-                    <div class="gus-tags">
-                        <?php 
-                        $municipality_count = 0;
-                        $max_municipalities = 3; // SEO最適化：最大3個まで表示
-                        foreach ($taxonomies['municipalities'] as $muni): 
-                            if ($municipality_count >= $max_municipalities) break;
-                            $municipality_count++;
-                        ?>
-                        <a href="<?php echo get_term_link($muni); ?>" 
-                           class="gus-tag"
-                           aria-label="<?php echo esc_attr($muni->name . 'の補助金一覧'); ?>">
-                            <?php echo esc_html($muni->name); ?>
-                        </a>
-                        <?php endforeach; ?>
-                        <?php if (count($taxonomies['municipalities']) > $max_municipalities): ?>
-                        <span class="gus-tag-more" style="font-size: 11px; color: #666;">
-                            +<?php echo count($taxonomies['municipalities']) - $max_municipalities; ?>件
                         </span>
                         <?php endif; ?>
                     </div>
@@ -4542,29 +5660,24 @@ select {
             <li class="gus-toc-item">
                 <a href="#grant-details" class="gus-toc-link mobile-toc-link">補助金詳細</a>
             </li>
-            <?php if ($grant_data['grant_target']): ?>
-            <li class="gus-toc-item">
-                <a href="#target" class="gus-toc-link mobile-toc-link">対象者・対象事業</a>
-            </li>
-            <?php endif; ?>
-            <?php if ($grant_data['required_documents']): ?>
-            <li class="gus-toc-item">
-                <a href="#documents" class="gus-toc-link mobile-toc-link">必要書類</a>
-            </li>
-            <?php endif; ?>
             <li class="gus-toc-item">
                 <a href="#application-flow" class="gus-toc-link mobile-toc-link">申請の流れ</a>
             </li>
             <li class="gus-toc-item">
                 <a href="#faq" class="gus-toc-link mobile-toc-link">よくある質問</a>
             </li>
+            <?php if ($related_columns_query && $related_columns_query->have_posts()): ?>
+            <li class="gus-toc-item">
+                <a href="#related-columns" class="gus-toc-link mobile-toc-link">詳しい記事</a>
+            </li>
+            <?php endif; ?>
             <?php if ($grant_data['contact_info']): ?>
             <li class="gus-toc-item">
                 <a href="#contact" class="gus-toc-link mobile-toc-link">お問い合わせ</a>
             </li>
             <?php endif; ?>
             <li class="gus-toc-item">
-                <a href="#related" class="gus-toc-link mobile-toc-link">関連する補助金</a>
+                <a href="#related" class="gus-toc-link mobile-toc-link">おすすめ補助金</a>
             </li>
         </ul>
     </div>
@@ -5040,6 +6153,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }, observerOptions);
     
     sections.forEach(section => observer.observe(section));
+    
+    // ========================================
 });
 </script>
 

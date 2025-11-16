@@ -553,6 +553,40 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
                     </nav>
                 </div>
             </section>
+
+            <!-- AIアシスタントカード -->
+            <section class="sidebar-card ai-chat-card" aria-labelledby="ai-chat-title">
+                <header class="card-header card-header-ai">
+                    <i class="fas fa-robot" aria-hidden="true"></i>
+                    <h2 id="ai-chat-title">AI質問アシスタント</h2>
+                </header>
+                <div class="card-body">
+                    <div class="ai-chat-intro">
+                        <p>この記事について質問してください。AIがお答えします。</p>
+                    </div>
+                    <div class="desktop-ai-chat-messages" id="desktopAiMessages" role="log" aria-live="polite" aria-label="AIチャット">
+                        <div class="ai-message ai-message-assistant">
+                            <div class="ai-avatar" aria-hidden="true">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <div class="ai-content">
+                                こんにちは！この記事について何でも質問してください。
+                            </div>
+                        </div>
+                    </div>
+                    <div class="desktop-ai-input-container">
+                        <label for="desktopAiInput" class="sr-only">AI質問入力</label>
+                        <textarea id="desktopAiInput" 
+                                  placeholder="例：この補助金の申請期限は？" 
+                                  rows="2"
+                                  aria-label="AI質問入力"></textarea>
+                        <button id="desktopAiSend" class="desktop-ai-send-btn" aria-label="質問を送信">
+                            <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                            <span class="send-text">送信</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
             
             <!-- このコラムの補助金情報 -->
             <?php if ($related_grants_query && $related_grants_query->have_posts()): ?>
@@ -2382,8 +2416,131 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
     filter: drop-shadow(0 0 2px rgba(255, 235, 59, 0.5));
 }
 
+.card-header-ai {
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+    border-bottom: 3px solid #60a5fa;
+}
+
+.card-header-ai h2 {
+    color: #ffffff;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+
+.card-header-ai i {
+    color: #60a5fa;
+    filter: drop-shadow(0 0 2px rgba(96, 165, 250, 0.5));
+}
+
 .card-body {
     padding: 24px;
+}
+
+/* AIチャットカード - デスクトップ専用 */
+.ai-chat-card {
+    display: none;
+}
+
+@media (min-width: 1024px) {
+    .ai-chat-card {
+        display: block;
+    }
+}
+
+.ai-chat-intro {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #eff6ff;
+    border-left: 3px solid #2563eb;
+    border-radius: 4px;
+}
+
+.ai-chat-intro p {
+    margin: 0;
+    font-size: 14px;
+    color: #1e40af;
+    line-height: 1.5;
+}
+
+.desktop-ai-chat-messages {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    background: #f8fafc;
+    border-radius: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-gray-200) transparent;
+}
+
+.desktop-ai-chat-messages::-webkit-scrollbar {
+    width: 6px;
+}
+
+.desktop-ai-chat-messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.desktop-ai-chat-messages::-webkit-scrollbar-thumb {
+    background-color: var(--color-gray-200);
+    border-radius: 3px;
+}
+
+.desktop-ai-chat-messages::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-gray-600);
+}
+
+.desktop-ai-input-container {
+    display: flex;
+    gap: 8px;
+}
+
+.desktop-ai-input-container textarea {
+    flex: 1;
+    padding: 10px 12px;
+    border: 2px solid var(--color-gray-200);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    line-height: 1.5;
+    transition: border-color 0.2s;
+}
+
+.desktop-ai-input-container textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.desktop-ai-send-btn {
+    padding: 10px 16px;
+    background: #2563eb;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.desktop-ai-send-btn:hover,
+.desktop-ai-send-btn:focus {
+    background: #1e40af;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.desktop-ai-send-btn:active {
+    transform: translateY(0);
 }
 
 .toc-nav {
@@ -2790,7 +2947,7 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
 
 @media (min-width: 1024px) {
     .gus-mobile-toc-cta {
-        display: none;
+        display: flex;
     }
 }
 
@@ -3445,6 +3602,29 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
         });
     }
     
+    // AI送信処理（デスクトップ）
+    function initDesktopAI() {
+        const sendBtn = document.getElementById('desktopAiSend');
+        const input = document.getElementById('desktopAiInput');
+        const container = document.getElementById('desktopAiMessages');
+        
+        if (!sendBtn || !input || !container) return;
+        
+        sendBtn.addEventListener('click', function() {
+            const question = input.value.trim();
+            if (!question) return;
+            
+            sendAIMessage(question, container, input);
+        });
+        
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendBtn.click();
+            }
+        });
+    }
+    
     // AI共通送信処理
     function sendAIMessage(question, container, input) {
         const userMsg = document.createElement('div');
@@ -3547,10 +3727,10 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
             if (typeof data === 'string') {
                 return data;
             }
-            if (data && data.success && data.data && data.data.answer) {
-                return data.data.answer;
-            } else if (data && typeof data === 'object' && 'answer' in data) {
-                return data.answer;
+            if (data && data.success && data.data && (data.data.answer || data.data.response)) {
+                return data.data.answer || data.data.response;
+            } else if (data && typeof data === 'object' && (data.answer || data.response)) {
+                return data.answer || data.response;
             } else {
                 return generateFallbackResponse(question);
             }
@@ -3565,9 +3745,9 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
         const nonce = window.wpApiSettings && window.wpApiSettings.nonce ? window.wpApiSettings.nonce : '';
         
         const formData = new FormData();
-        formData.append('action', 'gi_ai_chat');
+        formData.append('action', 'gi_contextual_chat');
         formData.append('nonce', nonce);
-        formData.append('question', question);
+        formData.append('message', question);
         formData.append('context', JSON.stringify({
             title: titleText,
             content: contentText.substring(0, 3000),
@@ -3580,8 +3760,10 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success && data.data && data.data.answer) {
-                return data.data.answer;
+            if (data && data.success && data.data && (data.data.answer || data.data.response)) {
+                return data.data.answer || data.data.response;
+            } else if (data && typeof data === 'object' && (data.answer || data.response)) {
+                return data.answer || data.response;
             } else {
                 return generateFallbackResponse(question);
             }
@@ -3825,6 +4007,7 @@ if (!empty($acf_related_grants) && is_array($acf_related_grants)) {
         wrapTables();
         wrapEmbeds();
         initMobileAI();
+        initDesktopAI();
         initMobilePanel();
         updateViewCount();
         initSmoothScroll();
