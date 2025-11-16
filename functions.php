@@ -473,6 +473,11 @@ function gi_auto_insert_internal_links($content) {
         return $content;
     }
     
+    // コンテンツが空の場合は処理をスキップ
+    if (empty($content)) {
+        return $content;
+    }
+    
     // リンク対象のキーワードと対応するURL（主要補助金制度）
     $link_map = array(
         '事業再構築補助金' => home_url('/grants/jigyou-saikouchiku/'),
@@ -483,13 +488,44 @@ function gi_auto_insert_internal_links($content) {
     );
     
     foreach ($link_map as $keyword => $url) {
-        // すでにリンクになっていない場合のみ置換（最初の1つだけ）
-        // 正規表現: リンクタグ内ではない、かつhrefなどのHTML属性内でもない箇所
-        $pattern = '/(?<!<a[^>]{0,100}>)(?<!href=")(' . preg_quote($keyword, '/') . ')(?![^<]*<\/a>)(?!">)/u';
-        $replacement = '<a href="' . esc_url($url) . '" class="gi-auto-link" title="' . esc_attr($keyword . 'の詳細') . '">' . $keyword . '</a>';
+        // キーワードが既にリンク内に含まれていないかチェック
+        // より安全なアプローチ: <a>タグで囲まれていない最初の出現箇所のみ置換
         
-        // 最初の1つだけ置換（SEO的に過度なリンクを避ける）
-        $content = preg_replace($pattern, $replacement, $content, 1);
+        // まず、既存の<a>タグを一時的にプレースホルダーに置き換え
+        $protected_content = preg_replace_callback(
+            '/<a\b[^>]*>.*?<\/a>/is',
+            function($matches) {
+                static $counter = 0;
+                $placeholder = '###LINK_PLACEHOLDER_' . $counter . '###';
+                $GLOBALS['link_placeholders'][$placeholder] = $matches[0];
+                $counter++;
+                return $placeholder;
+            },
+            $content
+        );
+        
+        // プレースホルダーで保護されたコンテンツ内でキーワードを検索し、最初の1つだけリンク化
+        if ($protected_content && strpos($protected_content, $keyword) !== false) {
+            $replacement = '<a href="' . esc_url($url) . '" class="gi-auto-link" title="' . esc_attr($keyword . 'の詳細') . '">' . $keyword . '</a>';
+            
+            // 最初の出現のみ置換
+            $pos = strpos($protected_content, $keyword);
+            if ($pos !== false) {
+                $protected_content = substr_replace($protected_content, $replacement, $pos, strlen($keyword));
+            }
+        }
+        
+        // プレースホルダーを元の<a>タグに戻す
+        if (!empty($GLOBALS['link_placeholders'])) {
+            foreach ($GLOBALS['link_placeholders'] as $placeholder => $original) {
+                $protected_content = str_replace($placeholder, $original, $protected_content);
+            }
+        }
+        
+        $content = $protected_content;
+        
+        // グローバル変数をクリア
+        unset($GLOBALS['link_placeholders']);
     }
     
     return $content;
@@ -506,6 +542,11 @@ add_filter('the_content', 'gi_auto_insert_internal_links', 15);
  */
 function gi_add_lazy_loading_to_images($content) {
     if (!is_singular('grant')) {
+        return $content;
+    }
+    
+    // コンテンツが空の場合は処理をスキップ
+    if (empty($content)) {
         return $content;
     }
     
