@@ -279,28 +279,33 @@ if (has_post_thumbnail($post_id)) {
     }
 }
 
-// SEO: メタディスクリプション生成（最適化版: 150-160文字）
-// Google推奨: 30単語ではなく、150-160文字（日本語75-80文字）に最適化
+// SEO: メタディスクリプション生成（日本語最適化版: 80-120文字）
+// Google推奨: 日本語の場合、80-120文字が最適（SEO総合診断レポートに基づく）
+// 160文字は英語向けの推奨値で、日本語には長すぎる
 $meta_description = '';
+$optimal_length = 110; // 日本語の最適文字数
+
 if (!empty($grant_data['ai_summary'])) {
     $raw_text = wp_strip_all_tags($grant_data['ai_summary']);
-    $meta_description = mb_substr($raw_text, 0, 160, 'UTF-8');
-    if (mb_strlen($raw_text, 'UTF-8') > 160) {
+    $meta_description = mb_substr($raw_text, 0, $optimal_length, 'UTF-8');
+    if (mb_strlen($raw_text, 'UTF-8') > $optimal_length) {
         $meta_description .= '...';
     }
 } elseif (has_excerpt()) {
     $raw_text = wp_strip_all_tags(get_the_excerpt());
-    $meta_description = mb_substr($raw_text, 0, 160, 'UTF-8');
-    if (mb_strlen($raw_text, 'UTF-8') > 160) {
+    $meta_description = mb_substr($raw_text, 0, $optimal_length, 'UTF-8');
+    if (mb_strlen($raw_text, 'UTF-8') > $optimal_length) {
         $meta_description .= '...';
     }
 } else {
-    $raw_text = wp_strip_all_tags(get_the_content());
-    $meta_description = mb_substr($raw_text, 0, 160, 'UTF-8');
-    if (mb_strlen($raw_text, 'UTF-8') > 160) {
-        $meta_description .= '...';
-    }
+    // フォールバック: タイトル + 説明文
+    $meta_description = get_the_title() . ' - 補助金の詳細、申請条件、必要書類、対象経費などを詳しく解説。';
+    $meta_description = mb_substr($meta_description, 0, $optimal_length, 'UTF-8');
 }
+
+// 改行・タブを削除してクリーンアップ
+$meta_description = preg_replace('/\s+/', ' ', $meta_description);
+$meta_description = trim($meta_description);
 
 // 読了時間計算
 $content = get_the_content();
@@ -811,7 +816,16 @@ select {
           "url": "<?php echo esc_js(get_permalink() . '#application-flow'); ?>"
         }
       ],
-      "totalTime": "P2M"
+      "totalTime": "<?php 
+        // 申請難易度に応じて所要時間を動的に計算
+        $estimated_time = 'P2M'; // デフォルト: 2ヶ月
+        if ($grant_data['grant_difficulty'] === 'easy') {
+            $estimated_time = 'P1M'; // 簡単: 1ヶ月
+        } elseif ($grant_data['grant_difficulty'] === 'hard') {
+            $estimated_time = 'P3M'; // 難しい: 3ヶ月
+        }
+        echo esc_js($estimated_time);
+      ?>"
     },
     {
       "@type": "WebPage",
@@ -4316,6 +4330,61 @@ select {
         display: none;
     }
 }
+
+/* ========================================
+   コンバージョン最適化版 関連補助金セクション
+   ======================================== */
+
+.gus-conversion-optimized {
+    background: linear-gradient(180deg, #FAFAFA 0%, #FFFFFF 100%);
+    padding: var(--gus-space-2xl) 0;
+    border-top: 4px solid #FFD700;
+    margin-top: var(--gus-space-2xl);
+}
+
+.gus-conversion-message {
+    display: flex;
+    align-items: center;
+    gap: var(--gus-space-lg);
+    background: linear-gradient(135deg, #FFF9E6 0%, #FFFBF0 100%);
+    border: 2px solid #FFD700;
+    border-radius: 12px;
+    padding: var(--gus-space-xl);
+    margin-bottom: var(--gus-space-2xl);
+    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.15);
+}
+
+.gus-conversion-icon {
+    font-size: 2.5rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.gus-conversion-text {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: #333;
+}
+
+.gus-conversion-text strong {
+    font-size: 1.125rem;
+    color: #B8860B;
+    display: block;
+    margin-bottom: 6px;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .gus-conversion-message {
+        flex-direction: column;
+        text-align: center;
+        padding: var(--gus-space-lg);
+    }
+    
+    .gus-conversion-icon {
+        font-size: 2rem;
+    }
+}
 </style>
 
 <main class="gus-single" itemscope itemtype="https://schema.org/Article">
@@ -4533,16 +4602,33 @@ select {
             
             <!-- 関連する補助金 - MOVED TO POSITION 2 (after Grant Details) -->
             <?php if (!empty($scored_related_grants) && count($scored_related_grants) > 0): ?>
-            <section id="related" class="gus-related-section">
+            <section id="related" class="gus-related-section gus-conversion-optimized">
                 <header class="gus-related-section-header">
-                    <div class="gus-related-section-icon">■</div>
+                    <div class="gus-related-section-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                    </div>
                     <div style="flex: 1;">
-                        <h2 class="gus-related-section-title">あなたにおすすめの補助金</h2>
-                        <p style="font-size: var(--gus-text-sm); color: var(--gus-gray-600); margin: 8px 0 0 0; font-weight: 500;">
-                            同じ市町村・都道府県・カテゴリ・タグの補助金を優先的に表示しています（<?php echo count($scored_related_grants); ?>件）
-                        </p>
+                        <h2 class="gus-related-section-title">
+                            この補助金が合わなかった方へ<br>
+                            <span style="font-size: 0.8em; color: #666; font-weight: 500;">
+                                あなたに最適な <?php echo count($scored_related_grants); ?>件の補助金を厳選しました
+                            </span>
+                        </h2>
                     </div>
                 </header>
+                
+                <!-- 説得力のある誘導文 -->
+                <div class="gus-conversion-message">
+                    <div class="gus-conversion-icon">💡</div>
+                    <div class="gus-conversion-text">
+                        <strong>諦めるのはまだ早い！</strong><br>
+                        同じ地域・業種で申請できる補助金が他にもあります。条件が緩和されている制度や、締切が迫っている高額補助金も含まれています。
+                    </div>
+                </div>
                 <div class="gus-related-grid">
                     <?php 
                     $related_count = 0;

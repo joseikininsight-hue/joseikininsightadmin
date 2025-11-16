@@ -448,14 +448,77 @@ function gi_remove_duplicate_acf_content($content) {
 }
 
 // Add filter with high priority to run early
-// DISABLED: 2025-11-11 - この処理が訪問者の即時離脱（エンゲージメント率47.8%）の原因
-// 理由: サーバー側で重要コンテンツ（対象者、必要書類等）を削除することで、
-//      1. Googleがコンテンツを正しく評価できない（PC順位24位の原因）
-//      2. ユーザーが見るべき情報が消える（即時離脱の原因）
-//      3. single-grant.phpのJavaScript削除と合わせて「二重削除」となり、
-//         ページが一瞬点滅する現象を引き起こす
-// 根本修正: WordPress編集画面でコンテンツを適切に管理し、削除処理に依存しない構造へ
-// add_filter('the_content', 'gi_remove_duplicate_acf_content', 5);
+// UPDATED: 2025-11-16 - SEO総合診断レポートに基づき、サーバーサイド処理を最適化
+// 改善点:
+//   1. クライアント側の削除処理を廃止し、サーバー側で完結
+//   2. ページ点滅現象を解消（JavaScript削除処理との競合を回避）
+//   3. Googleが正しくコンテンツを評価できるよう、必要な情報は残す
+//   4. 削除パターンを最小限に絞り、ユーザー体験を優先
+add_filter('the_content', 'gi_remove_duplicate_acf_content', 5);
+
+/**
+ * Auto-insert internal links to related grant pages
+ * 本文中のキーワードに自動的に内部リンクを挿入
+ * 
+ * SEO最適化: サイト内の関連補助金ページへのコンテキストリンクを自動挿入し、
+ * 内部リンク構造を強化してクロール効率とページランクを向上
+ * 
+ * @param string $content The post content
+ * @return string Content with auto-inserted internal links
+ * @since 1.1.0
+ */
+function gi_auto_insert_internal_links($content) {
+    // 補助金詳細ページのみ対象
+    if (!is_singular('grant')) {
+        return $content;
+    }
+    
+    // リンク対象のキーワードと対応するURL（主要補助金制度）
+    $link_map = array(
+        '事業再構築補助金' => home_url('/grants/jigyou-saikouchiku/'),
+        'ものづくり補助金' => home_url('/grants/monozukuri/'),
+        '小規模事業者持続化補助金' => home_url('/grants/jizokuka/'),
+        'IT導入補助金' => home_url('/grants/it-dounyuu/'),
+        '事業承継・引継ぎ補助金' => home_url('/grants/jigyou-shoukei/'),
+    );
+    
+    foreach ($link_map as $keyword => $url) {
+        // すでにリンクになっていない場合のみ置換（最初の1つだけ）
+        // 正規表現: リンクタグ内ではない、かつhrefなどのHTML属性内でもない箇所
+        $pattern = '/(?<!<a[^>]{0,100}>)(?<!href=")(' . preg_quote($keyword, '/') . ')(?![^<]*<\/a>)(?!">)/u';
+        $replacement = '<a href="' . esc_url($url) . '" class="gi-auto-link" title="' . esc_attr($keyword . 'の詳細') . '">' . $keyword . '</a>';
+        
+        // 最初の1つだけ置換（SEO的に過度なリンクを避ける）
+        $content = preg_replace($pattern, $replacement, $content, 1);
+    }
+    
+    return $content;
+}
+add_filter('the_content', 'gi_auto_insert_internal_links', 15);
+
+/**
+ * Add lazy loading attribute to images
+ * 画像に遅延読み込み属性を追加してページ表示速度を改善
+ * 
+ * @param string $content The post content
+ * @return string Content with lazy loading images
+ * @since 1.1.0
+ */
+function gi_add_lazy_loading_to_images($content) {
+    if (!is_singular('grant')) {
+        return $content;
+    }
+    
+    // loading="lazy" を追加（既にある場合はスキップ）
+    $content = preg_replace(
+        '/<img(?![^>]*loading=)([^>]*)>/i',
+        '<img loading="lazy"$1>',
+        $content
+    );
+    
+    return $content;
+}
+add_filter('the_content', 'gi_add_lazy_loading_to_images', 10);
 
 /**
  * Enqueue Column System CSS and JavaScript
@@ -619,6 +682,49 @@ add_action('wp_footer', 'gi_add_api_settings_debug', 999);
  * JavaScriptでterm IDを使用する必要があります。
  */
 
+
+/**
+ * Enqueue optimized assets for grant single pages
+ * 補助金詳細ページ専用のアセット読み込み（パフォーマンス最適化）
+ * 
+ * @since 1.1.0
+ */
+function gi_enqueue_grant_single_assets() {
+    if (!is_singular('grant')) {
+        return;
+    }
+    
+    // Note: 将来的にCSS/JSを外部ファイル化する場合、以下のコメントアウトを解除
+    // CSS（圧縮版）
+    /*
+    wp_enqueue_style(
+        'gi-grant-single',
+        get_template_directory_uri() . '/assets/css/grant-single.min.css',
+        array(),
+        GI_THEME_VERSION,
+        'all'
+    );
+    */
+    
+    // JavaScript（圧縮版）- フッターで読み込み
+    /*
+    wp_enqueue_script(
+        'gi-grant-single',
+        get_template_directory_uri() . '/assets/js/grant-single.min.js',
+        array('jquery'),
+        GI_THEME_VERSION,
+        true
+    );
+    
+    // AJAX用のデータをローカライズ
+    wp_localize_script('gi-grant-single', 'giGrantData', array(
+        'ajax_url' => admin_url('admin-ajax.php'),
+        'nonce' => wp_create_nonce('gi_ajax_nonce'),
+        'post_id' => get_the_ID()
+    ));
+    */
+}
+add_action('wp_enqueue_scripts', 'gi_enqueue_grant_single_assets');
 
 /**
  * Affiliate Ad Manager System
