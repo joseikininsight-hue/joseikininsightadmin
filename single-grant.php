@@ -2781,136 +2781,119 @@ select {
     background: #999999;
 }
 
-/* 関連補助金カード - シンプル＆見やすいデザイン */
-.gus-related-card-simple {
-    display: block;
-    background: #FFFFFF;
-    border: 2px solid #E5E5E5;
-    border-left: 4px solid #000000;
-    padding: 20px;
-    text-decoration: none;
+.gus-related-card {
+    background: var(--gus-white);
+    border: 2px solid var(--gus-gray-300);
+    border-radius: 0;
+    padding: var(--gus-space-xl);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
     position: relative;
     overflow: hidden;
 }
 
-.gus-related-card-simple:hover {
-    border-color: #000000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    transform: translateY(-2px);
-    background: #FAFAFA;
+.gus-related-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, var(--gus-gray-900) 0%, var(--gus-gray-500) 100%);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s ease;
 }
 
-/* タイトル - 大きく目立たせる */
-.gus-related-card-title {
-    font-size: 17px;
+.gus-related-card:hover::before {
+    transform: scaleX(1);
+}
+
+.gus-related-card:hover {
+    border-color: var(--gus-gray-900);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+    transform: translateY(-4px);
+}
+
+.gus-related-card-number {
+    position: absolute;
+    top: var(--gus-space-lg);
+    right: var(--gus-space-lg);
+    width: 32px;
+    height: 32px;
+    background: var(--gus-gray-900);
+    color: var(--gus-white);
+    border-radius: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--gus-text-xs);
     font-weight: 800;
-    line-height: 1.5;
-    color: #000000;
-    margin: 0 0 16px 0;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+}
+
+.gus-related-card h3 {
+    font-size: 1.125rem;
+    font-weight: 700;
+    margin-bottom: var(--gus-space-md);
+    line-height: 1.4;
+    padding-right: 40px;
+}
+
+.gus-related-card h3 a {
+    color: var(--gus-black);
+    text-decoration: none;
     transition: color 0.2s ease;
 }
 
-.gus-related-card-simple:hover .gus-related-card-title {
-    color: #0066cc;
+.gus-related-card h3 a:hover {
+    color: var(--gus-gray-700);
 }
 
-/* 重要情報ハイライト - 金額・地域・カテゴリを大きく */
-.gus-related-card-highlights {
+.gus-related-card-meta {
     display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 12px;
+    flex-direction: column;
+    gap: var(--gus-space-sm);
+    margin-bottom: var(--gus-space-lg);
+    padding: var(--gus-space-md);
+    background: var(--gus-gray-50);
+    border-radius: 0;
 }
 
-.gus-related-highlight {
-    display: inline-flex;
+.gus-related-card-meta-item {
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    background: #F5F5F5;
-    border-radius: 0;
-    font-size: 14px;
+    gap: var(--gus-space-xs);
+    font-size: var(--gus-text-sm);
+    color: var(--gus-gray-700);
+}
+
+.gus-related-card-meta-label {
+    font-weight: 600;
+    color: var(--gus-gray-600);
+    min-width: 60px;
+}
+
+.gus-related-card-meta-value {
     font-weight: 700;
-    border-left: 3px solid;
+    color: var(--gus-black);
+}
+
+.gus-related-card .gus-btn {
+    margin-top: auto;
+    font-size: var(--gus-text-sm);
+    font-weight: 700;
+    padding: 12px var(--gus-space-lg);
+    background: var(--gus-gray-900);
+    color: var(--gus-white);
+    border: 2px solid var(--gus-gray-900);
     transition: all 0.2s ease;
 }
 
-.gus-related-card-simple:hover .gus-related-highlight {
-    background: #FFFFFF;
-}
-
-.gus-highlight-amount {
-    border-left-color: #2196F3;
-    color: #1976D2;
-}
-
-.gus-highlight-amount svg {
-    stroke: #2196F3;
-}
-
-.gus-highlight-location {
-    border-left-color: #4CAF50;
-    color: #388E3C;
-}
-
-.gus-highlight-location svg {
-    stroke: #4CAF50;
-}
-
-.gus-highlight-category {
-    border-left-color: #FF9800;
-    color: #F57C00;
-}
-
-.gus-highlight-category svg {
-    stroke: #FF9800;
-}
-
-.gus-highlight-value {
-    font-size: 15px;
-    font-weight: 800;
-}
-
-/* マッチング情報 - 控えめに小さく */
-.gus-related-match-badge {
-    display: inline-block;
-    padding: 4px 10px;
-    background: #F0F0F0;
-    color: #666666;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: 0;
-    margin-bottom: 12px;
-}
-
-/* アクションヒント */
-.gus-related-card-action {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid #F0F0F0;
-    font-size: 14px;
-    font-weight: 700;
-    color: #0066cc;
-    opacity: 0;
-    transform: translateX(-10px);
-    transition: all 0.3s ease;
-}
-
-.gus-related-card-simple:hover .gus-related-card-action {
-    opacity: 1;
-    transform: translateX(0);
-}
-
-.gus-related-card-action svg {
-    stroke: currentColor;
+.gus-related-card .gus-btn:hover {
+    background: var(--gus-white);
+    color: var(--gus-gray-900);
+    transform: translateX(4px);
 }
 
 /* アイコン */
@@ -3105,33 +3088,19 @@ select {
         max-height: 500px;
     }
     
-    .gus-related-card-simple {
-        padding: 16px;
+    .gus-related-card {
+        padding: var(--gus-space-lg);
     }
     
-    .gus-related-card-title {
-        font-size: 16px;
-        margin-bottom: 14px;
+    .gus-related-card-number {
+        width: 28px;
+        height: 28px;
+        font-size: 0.625rem;
     }
     
-    .gus-related-card-highlights {
-        gap: 10px;
-    }
-    
-    .gus-related-highlight {
-        padding: 6px 12px;
-        font-size: 13px;
-    }
-    
-    .gus-highlight-value {
-        font-size: 14px;
-    }
-    
-    .gus-related-card-action {
-        margin-top: 10px;
-        padding-top: 10px;
-        opacity: 1;
-        transform: translateX(0);
+    .gus-related-card h3 {
+        font-size: 1rem;
+        padding-right: 36px;
     }
     
     .gus-social-buttons {
@@ -3199,53 +3168,6 @@ select {
         padding: 10px 14px;
         min-height: 48px;
         font-size: var(--gus-text-base);
-    }
-    
-    .gus-related-card-simple {
-        padding: 14px;
-    }
-    
-    .gus-related-card-title {
-        font-size: 15px;
-        margin-bottom: 12px;
-    }
-    
-    .gus-related-card-highlights {
-        gap: 8px;
-        margin-bottom: 10px;
-    }
-    
-    .gus-related-highlight {
-        padding: 6px 10px;
-        font-size: 12px;
-        gap: 4px;
-    }
-    
-    .gus-related-highlight svg {
-        width: 12px;
-        height: 12px;
-        flex-shrink: 0;
-    }
-    
-    .gus-highlight-value {
-        font-size: 13px;
-    }
-    
-    .gus-related-match-badge {
-        font-size: 10px;
-        padding: 3px 8px;
-        margin-bottom: 10px;
-    }
-    
-    .gus-related-card-action {
-        font-size: 13px;
-        margin-top: 8px;
-        padding-top: 8px;
-    }
-    
-    .gus-related-card-action svg {
-        width: 14px;
-        height: 14px;
     }
     
     .gus-mobile-toc-cta {
@@ -4659,61 +4581,62 @@ select {
                             }
                         }
                     ?>
-                    <a href="<?php echo esc_url(get_permalink($related_post_id)); ?>" class="gus-related-card-simple">
-                        
-                        <!-- タイトル -->
-                        <h3 class="gus-related-card-title">
-                            <?php echo esc_html(get_the_title($related_post_id)); ?>
+                    <div class="gus-related-card">
+                        <div class="gus-related-card-number"><?php echo $related_count; ?></div>
+                        <h3>
+                            <a href="<?php echo esc_url(get_permalink($related_post_id)); ?>">
+                                <?php echo esc_html(get_the_title($related_post_id)); ?>
+                            </a>
                         </h3>
                         
-                        <!-- 重要情報（金額・地域・カテゴリ）を大きく表示 -->
-                        <div class="gus-related-card-highlights">
+                        <?php if ($related_match_details || $related_score > 0): ?>
+                        <div style="background: #FFF9E6; border: 1px solid #FFD700; padding: 8px 12px; margin-bottom: 12px; border-radius: 4px;">
+                            <div style="font-size: 11px; color: #B8860B; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
+                                ✨ マッチング理由
+                            </div>
+                            <div style="font-size: 12px; color: #666; font-weight: 600;">
+                                <?php echo esc_html($related_match_details); ?>
+                            </div>
+                            <?php if ($related_score > 0): ?>
+                            <div style="font-size: 10px; color: #999; margin-top: 4px;">
+                                関連度スコア: <?php echo $related_score; ?>点
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="gus-related-card-meta">
                             <?php if ($related_max_amount): ?>
-                            <div class="gus-related-highlight gus-highlight-amount">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <line x1="12" y1="1" x2="12" y2="23"/>
-                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                                </svg>
-                                <span class="gus-highlight-value"><?php echo esc_html($related_max_amount); ?></span>
+                            <div class="gus-related-card-meta-item">
+                                <span class="gus-related-card-meta-label">補助上限:</span>
+                                <span class="gus-related-card-meta-value"><?php echo esc_html($related_max_amount); ?></span>
                             </div>
                             <?php endif; ?>
                             
                             <?php if ($related_pref_display): ?>
-                            <div class="gus-related-highlight gus-highlight-location">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                                    <circle cx="12" cy="10" r="3"/>
-                                </svg>
-                                <span class="gus-highlight-value"><?php echo esc_html($related_pref_display); ?></span>
+                            <div class="gus-related-card-meta-item">
+                                <span class="gus-related-card-meta-label">対象地域:</span>
+                                <span class="gus-related-card-meta-value"><?php echo esc_html($related_pref_display); ?></span>
                             </div>
                             <?php endif; ?>
                             
                             <?php if (!empty($related_cats)): ?>
-                            <div class="gus-related-highlight gus-highlight-category">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                </svg>
-                                <span class="gus-highlight-value"><?php echo esc_html($related_cats[0]->name); ?></span>
+                            <div class="gus-related-card-meta-item">
+                                <span class="gus-related-card-meta-label">カテゴリ:</span>
+                                <span class="gus-related-card-meta-value"><?php echo esc_html($related_cats[0]->name); ?></span>
                             </div>
                             <?php endif; ?>
                         </div>
                         
-                        <!-- 控えめなマッチング情報（小さく） -->
-                        <?php if ($related_match_details): ?>
-                        <div class="gus-related-match-badge">
-                            <?php echo esc_html($related_match_details); ?>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <!-- アクションヒント -->
-                        <div class="gus-related-card-action">
-                            <span>詳しく見る</span>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <a href="<?php echo esc_url(get_permalink($related_post_id)); ?>" 
+                           class="gus-btn gus-btn-primary"
+                           style="margin-top: auto;">
+                            詳細を見る
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="9 18 15 12 9 6"/>
                             </svg>
-                        </div>
-                        
-                    </a>
+                        </a>
+                    </div>
                     <?php endforeach; ?>
                 </div>
                 
